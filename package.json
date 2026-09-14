@@ -23,7 +23,8 @@
     "postinstall": "node scripts/build-audio-tap.mjs || echo '[audio-tap] not built yet - run: npm run build:tap'",
     "verify": "npm run typecheck && npm run lint && npm test && npm run build",
     "doctor": "node scripts/doctor.mjs",
-    "setup:mac": "bash scripts/setup-mac.sh"
+    "setup:mac": "bash scripts/setup-mac.sh",
+    "preflight": "bash scripts/preflight.sh"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0"
