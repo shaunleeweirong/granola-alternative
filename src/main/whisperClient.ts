@@ -72,8 +72,14 @@ export class WhisperClient {
   }
 
   async transcribe(request: WhisperRequest): Promise<string> {
+    const wav = pcm16ToWav(request.pcm);
+    // Copy into a plain ArrayBuffer: a node Buffer may be backed by a pooled or
+    // shared buffer, which is not a valid BlobPart.
+    const wavBytes = new Uint8Array(wav.byteLength);
+    wavBytes.set(wav);
+
     const form = new FormData();
-    form.append("file", new Blob([pcm16ToWav(request.pcm)], { type: "audio/wav" }), "audio.wav");
+    form.append("file", new Blob([wavBytes], { type: "audio/wav" }), "audio.wav");
     form.append("response_format", "json");
     form.append("temperature", "0");
     // FR-14: always explicit. Left to "auto", short turns ("yeah", "right")

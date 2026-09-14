@@ -2,9 +2,18 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": false,
-    "allowImportingTsExtensions": false,
     "outDir": "dist",
-    "rootDir": "."
+    "rootDir": ".",
+    // Electron's main process and, critically, its preload scripts are loaded
+    // as CommonJS: a `.js` preload is always treated as CJS whatever
+    // package.json says. Emitting ESM here breaks the preload at launch and
+    // complicates `electron` and better-sqlite3 interop, so the source stays
+    // ESM TypeScript and only the build output is CommonJS.
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "verbatimModuleSyntax": false,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
   },
   "include": ["src/main/**/*", "src/core/**/*", "src/shared/**/*"]
 }

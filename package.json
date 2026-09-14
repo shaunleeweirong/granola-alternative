@@ -11,7 +11,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build:main": "tsc -p tsconfig.main.json",
+    "build:main": "tsc -p tsconfig.main.json && node scripts/finalize-main-build.mjs",
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:renderer",
     "test": "node --test --test-reporter=spec \"test/**/*.test.ts\"",

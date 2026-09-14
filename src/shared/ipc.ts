@@ -1,0 +1,116 @@
+import type { Channel, TranscriptSegment } from "../core/transcript/types.ts";
+
+/** Channel names for renderer <-> main. Kept in one place so both sides agree. */
+export const IPC = {
+  recordingStart: "recording:start",
+  recordingStop: "recording:stop",
+  recordingMicChunk: "recording:mic-chunk",
+  recordingLevel: "recording:level",
+  transcriptSegment: "transcript:segment",
+  transcriptError: "transcript:error",
+  audioSystemSilent: "audio:system-silent",
+  permissionsSystemAudio: "permissions:system-audio",
+  permissionsRequestSystemAudio: "permissions:request-system-audio",
+  notesGenerate: "notes:generate",
+  notesGenerateChunk: "notes:generate-chunk",
+  notesList: "notes:list",
+  notesGet: "notes:get",
+  notesUpdate: "notes:update",
+  notesDelete: "notes:delete",
+  notesExport: "notes:export",
+  dictionaryGet: "dictionary:get",
+  dictionarySet: "dictionary:set",
+  servicesStatus: "services:status",
+} as const;
+
+export interface StartRecordingResult {
+  sessionId: string;
+  noteId: number;
+  /** False when the system-audio tap could not start; the app records mic-only. */
+  systemAudioReady: boolean;
+  systemAudioReason?: string;
+}
+
+export interface StopRecordingResult {
+  noteId: number;
+  segmentCount: number;
+  durationMs: number;
+}
+
+export interface LevelUpdate {
+  channel: Channel;
+  rms: number;
+}
+
+export interface SegmentEvent {
+  sessionId: string;
+  noteId: number;
+  segment: TranscriptSegment;
+}
+
+export interface TranscriptErrorEvent {
+  sessionId: string;
+  message: string;
+  fatal: boolean;
+}
+
+export interface NoteSummaryDto {
+  id: number;
+  title: string;
+  createdAt: number;
+  durationMs: number;
+  segmentCount: number;
+  snippet?: string;
+}
+
+export interface NoteDto {
+  id: number;
+  title: string;
+  manualNotes: string;
+  generatedNotes: string;
+  createdAt: number;
+  durationMs: number;
+  segments: TranscriptSegment[];
+}
+
+export interface ServicesStatus {
+  transcriptionReady: boolean;
+  languageModelReady: boolean;
+  systemAudioSupported: boolean;
+  systemAudioGranted: boolean;
+}
+
+export interface GenerateChunkEvent {
+  noteId: number;
+  delta: string;
+  done?: boolean;
+  error?: string;
+}
+
+/** The surface the preload script exposes on `window.api`. */
+export interface RendererApi {
+  startRecording(input: { title?: string }): Promise<StartRecordingResult>;
+  stopRecording(input: { sessionId: string }): Promise<StopRecordingResult>;
+  sendMicChunk(pcm: ArrayBuffer, startSample: number): void;
+  listNotes(input: { query?: string; limit?: number; offset?: number }): Promise<NoteSummaryDto[]>;
+  getNote(input: { noteId: number }): Promise<NoteDto | null>;
+  updateNote(input: {
+    noteId: number;
+    title?: string;
+    manualNotes?: string;
+    generatedNotes?: string;
+  }): Promise<void>;
+  deleteNote(input: { noteId: number }): Promise<void>;
+  exportNote(input: { noteId: number }): Promise<{ path: string } | null>;
+  generateNotes(input: { noteId: number }): Promise<void>;
+  getDictionary(): Promise<string[]>;
+  setDictionary(terms: string[]): Promise<void>;
+  getServicesStatus(): Promise<ServicesStatus>;
+  requestSystemAudioAccess(): Promise<{ granted: boolean }>;
+
+  onLevel(handler: (event: LevelUpdate) => void): () => void;
+  onSegment(handler: (event: SegmentEvent) => void): () => void;
+  onTranscriptError(handler: (event: TranscriptErrorEvent) => void): () => void;
+  onGenerateChunk(handler: (event: GenerateChunkEvent) => void): () => void;
+  onSystemAudioSilent(handler: () => void): () => void;
+}

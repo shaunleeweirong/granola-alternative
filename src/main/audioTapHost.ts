@@ -1,4 +1,8 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
+import type { Readable } from "node:stream";
+
+/** stdio is ["ignore", "pipe", "pipe"], so stdin is null and both readers exist. */
+type TapProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 /**
  * Supervises the macOS system-audio helper (native/macos-audio-tap).
@@ -44,7 +48,7 @@ export class AudioTapHost {
   private readonly options: Required<Omit<AudioTapOptions, "spawnFn">> & {
     spawnFn: typeof spawn;
   };
-  private child: ChildProcessWithoutNullStreams | null = null;
+  private child: TapProcess | null = null;
   private handlers: AudioTapHandlers | null = null;
   /** Odd trailing byte from a stdout read; a sample must not be split. */
   private sampleCarry: Buffer = Buffer.alloc(0);
@@ -76,7 +80,7 @@ export class AudioTapHost {
 
     const child = this.options.spawnFn(this.options.command, this.options.args, {
       stdio: ["ignore", "pipe", "pipe"],
-    }) as ChildProcessWithoutNullStreams;
+    }) as TapProcess;
     this.child = child;
 
     return new Promise<void>((resolve, reject) => {
