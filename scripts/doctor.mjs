@@ -6,6 +6,7 @@
  * sentence. Every failed check prints the exact next action.
  */
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { existsSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -111,8 +112,25 @@ check("Swift compiler", () => {
 });
 
 check("Project dependencies installed", () => {
-  const has = existsSync(path.join(root, "node_modules", "better-sqlite3"));
-  return { ok: has, detail: has ? "node_modules present" : "missing", fix: has ? undefined : "Run: npm install" };
+  if (!existsSync(path.join(root, "node_modules", "better-sqlite3"))) {
+    return { ok: false, detail: "missing", fix: "Run: npm install" };
+  }
+  // better-sqlite3 is native code, so "the folder exists" is not the same as
+  // "it loads". Actually require it, and tell the two failure modes apart.
+  try {
+    createRequire(import.meta.url)("better-sqlite3");
+    return { ok: true, detail: "installed and loading correctly" };
+  } catch (error) {
+    const message = String(error?.message ?? error);
+    if (/NODE_MODULE_VERSION|was compiled against/i.test(message)) {
+      return {
+        ok: false,
+        detail: "built for a different runtime",
+        fix: "Run: npm run rebuild:node   (then npm run rebuild:electron before npm start)",
+      };
+    }
+    return { ok: false, detail: message.split("\n")[0], fix: "Run: npm install" };
+  }
 });
 
 check("System audio helper built", () => {

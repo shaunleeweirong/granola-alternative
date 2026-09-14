@@ -18,26 +18,30 @@
     "test:core": "node --test --test-reporter=spec \"test/core/**/*.test.ts\"",
     "lint": "eslint src test",
     "dev": "vite",
-    "start": "npm run build && electron dist/src/main/index.js",
+    "start": "npm run build && npm run rebuild:electron && electron dist/src/main/index.js",
     "build:tap": "node scripts/build-audio-tap.mjs",
     "postinstall": "node scripts/build-audio-tap.mjs || echo '[audio-tap] not built yet - run: npm run build:tap'",
     "verify": "npm run typecheck && npm run lint && npm test && npm run build",
     "doctor": "node scripts/doctor.mjs",
     "setup:mac": "bash scripts/setup-mac.sh",
-    "preflight": "bash scripts/preflight.sh"
+    "preflight": "bash scripts/preflight.sh",
+    "rebuild:node": "npm rebuild better-sqlite3",
+    "rebuild:electron": "electron-rebuild -f -o better-sqlite3",
+    "pretest": "node scripts/ensure-node-abi.mjs"
   },
   "dependencies": {
-    "better-sqlite3": "^11.7.0"
+    "better-sqlite3": "^13.0.3"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12",
+    "@electron/rebuild": "^4.2.0",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "@typescript-eslint/eslint-plugin": "^8.18.1",
     "@typescript-eslint/parser": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.2.1",
+    "electron": "^44.3.0",
     "eslint": "^8.57.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
