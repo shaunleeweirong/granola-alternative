@@ -89,8 +89,16 @@ jobs:
 
       - name: Build the app bundle
         run: |
+          set -euo pipefail
           npm run build
           npx electron-builder --mac dir --arm64
+
+          # electron-builder names the output folder by architecture, and that
+          # has changed between versions. Find the bundle rather than guess it.
+          app=$(find release -maxdepth 2 -name "*.app" -type d | head -1)
+          test -n "$app" || { echo "::error::no .app bundle produced"; exit 1; }
+          echo "APP_PATH=$app" >> "$GITHUB_ENV"
+          echo "Built $app"
 
       - name: Ad-hoc sign the app
         # Without a signature Apple Silicon refuses to launch the app at all,
@@ -99,7 +107,7 @@ jobs:
         # notarisation, so Gatekeeper still warns on first open.
         run: |
           set -euo pipefail
-          app="release/mac-arm64/Meeting Notes.app"
+          app="$APP_PATH"
           test -d "$app" || { echo "::error::app bundle not found at $app"; exit 1; }
 
           # Inner binaries must be signed before the bundle that contains them.
@@ -125,7 +133,7 @@ jobs:
       - name: Verify the signature and the bundled parts
         run: |
           set -euo pipefail
-          app="release/mac-arm64/Meeting Notes.app"
+          app="$APP_PATH"
 
           codesign --verify --deep --strict --verbose=2 "$app"
           codesign -dv "$app" 2>&1 | tee /tmp/sig.txt
@@ -146,7 +154,7 @@ jobs:
           echo "Bundle contents and permission strings verified."
 
       - name: Build the .dmg
-        run: npx electron-builder --mac dmg --arm64 --prepackaged "release/mac-arm64/Meeting Notes.app"
+        run: npx electron-builder --mac dmg --arm64 --prepackaged "$APP_PATH"
 
       - name: Name the .dmg by commit
         id: artifact
