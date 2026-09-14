@@ -1,0 +1,186 @@
+name: Build macOS app
+
+# Produces an installable .dmg on GitHub's own Mac hardware. Two reasons this
+# cannot happen anywhere else: the system-audio helper is Swift and needs
+# swiftc, and a .dmg needs macOS to assemble.
+#
+# Run it from the Actions tab with "Run workflow", or push a v* tag to also
+# publish a Release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Also publish a GitHub Release with the .dmg"
+        type: boolean
+        default: false
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  WHISPER_MODEL: ggml-base.en.bin
+  WHISPER_MODEL_URL: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+  # There is no Apple Developer certificate in this repository, so stop
+  # electron-builder hunting for one and failing. The app is ad-hoc signed
+  # below instead, which is the minimum Apple Silicon will run at all.
+  CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+jobs:
+  build:
+    # Apple Silicon runner. The app itself requires macOS 14.2 or later to run.
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the test suite
+        # A broken build should never reach a .dmg.
+        run: npm run verify
+
+      - name: Build the system audio helper
+        run: |
+          npm run build:tap
+          test -x resources/bin/meeting-audio-tap || {
+            echo "::error::The Swift audio helper did not build"; exit 1;
+          }
+
+      - name: Cache the speech engine build
+        id: whisper-cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/whisper.cpp/build
+          key: whisper-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Build the speech engine
+        run: |
+          set -euo pipefail
+          mkdir -p .cache
+          if [ ! -d .cache/whisper.cpp/.git ]; then
+            git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git .cache/whisper.cpp
+          fi
+          cmake -S .cache/whisper.cpp -B .cache/whisper.cpp/build \
+            -DCMAKE_BUILD_TYPE=Release -DWHISPER_BUILD_SERVER=ON
+          cmake --build .cache/whisper.cpp/build --config Release -j "$(sysctl -n hw.ncpu)"
+
+          mkdir -p resources/bin
+          server=$(find .cache/whisper.cpp/build -name whisper-server -type f -perm -u+x | head -1)
+          test -n "$server" || { echo "::error::no whisper-server binary produced"; exit 1; }
+          cp "$server" resources/bin/whisper-server
+          chmod +x resources/bin/whisper-server
+
+      - name: Bundle the speech model
+        run: |
+          set -euo pipefail
+          mkdir -p resources/models
+          curl -fL --retry 3 "$WHISPER_MODEL_URL" -o "resources/models/$WHISPER_MODEL"
+          ls -lh "resources/models/$WHISPER_MODEL"
+
+      - name: Build the app bundle
+        run: |
+          npm run build
+          npx electron-builder --mac dir --arm64
+
+      - name: Ad-hoc sign the app
+        # Without a signature Apple Silicon refuses to launch the app at all,
+        # and macOS ties recording permissions to the signature. An ad-hoc
+        # signature is free and enough for a private test build; it is NOT
+        # notarisation, so Gatekeeper still warns on first open.
+        run: |
+          set -euo pipefail
+          app="release/mac-arm64/Meeting Notes.app"
+          test -d "$app" || { echo "::error::app bundle not found at $app"; exit 1; }
+
+          # Inner binaries must be signed before the bundle that contains them.
+          find "$app/Contents/Resources/bin" -type f -perm -u+x -print0 2>/dev/null |
+            while IFS= read -r -d '' binary; do
+              codesign --force --sign - --timestamp=none --options runtime "$binary"
+            done
+
+          find "$app" -name "*.node" -print0 |
+            while IFS= read -r -d '' native; do
+              codesign --force --sign - --timestamp=none "$native"
+            done
+
+          find "$app/Contents/Frameworks" -maxdepth 1 \( -name "*.framework" -o -name "*.app" \) -print0 2>/dev/null |
+            while IFS= read -r -d '' item; do
+              codesign --force --sign - --timestamp=none --options runtime \
+                --entitlements build/entitlements.mac.plist "$item"
+            done
+
+          codesign --force --sign - --timestamp=none --options runtime \
+            --entitlements build/entitlements.mac.plist "$app"
+
+      - name: Verify the signature and the bundled parts
+        run: |
+          set -euo pipefail
+          app="release/mac-arm64/Meeting Notes.app"
+
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv "$app" 2>&1 | tee /tmp/sig.txt
+          grep -q "Signature=adhoc" /tmp/sig.txt || {
+            echo "::error::app is not signed; Apple Silicon will refuse to launch it"; exit 1;
+          }
+
+          for required in \
+            "Contents/Resources/bin/meeting-audio-tap" \
+            "Contents/Resources/bin/whisper-server" \
+            "Contents/Resources/models/$WHISPER_MODEL"; do
+            test -e "$app/$required" || { echo "::error::missing $required"; exit 1; }
+          done
+
+          plist="$app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :NSMicrophoneUsageDescription" "$plist" >/dev/null
+          /usr/libexec/PlistBuddy -c "Print :NSAudioCaptureUsageDescription" "$plist" >/dev/null
+          echo "Bundle contents and permission strings verified."
+
+      - name: Build the .dmg
+        run: npx electron-builder --mac dmg --arm64 --prepackaged "release/mac-arm64/Meeting Notes.app"
+
+      - name: Name the .dmg by commit
+        id: artifact
+        run: |
+          set -euo pipefail
+          dmg=$(find release -maxdepth 1 -name "*.dmg" | head -1)
+          test -n "$dmg" || { echo "::error::no .dmg produced"; exit 1; }
+          final="release/MeetingNotes-arm64-${GITHUB_SHA::7}.dmg"
+          mv "$dmg" "$final"
+          shasum -a 256 "$final" | tee "$final.sha256.txt"
+          echo "path=$final" >> "$GITHUB_OUTPUT"
+          ls -lh "$final"
+
+      - name: Upload the .dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: MeetingNotes-macOS-arm64
+          path: |
+            release/*.dmg
+            release/*.sha256.txt
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Publish a Release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ "$GITHUB_REF" != refs/tags/* ]]; then
+            tag="build-${GITHUB_SHA::7}"
+            gh release create "$tag" --title "Test build ${GITHUB_SHA::7}" --notes \
+              "Unsigned test build for Apple Silicon Macs running macOS 14.2 or later. See the install notes in docs/INSTALL-DMG.md." \
+              || echo "Release $tag already exists"
+          fi
+          gh release upload "$tag" release/*.dmg release/*.sha256.txt --clobber

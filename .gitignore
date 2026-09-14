@@ -6,3 +6,9 @@ out/
 .env
 coverage/
 models/
+
+# Packaging outputs and downloaded binaries/models
+release/
+resources/bin/
+resources/models/
+.cache/

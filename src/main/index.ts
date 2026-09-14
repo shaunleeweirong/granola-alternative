@@ -13,6 +13,7 @@ import { LlamaClient } from "./llamaClient.ts";
 import { LocalService } from "./localService.ts";
 import { buildNoteMessages, chunkTranscript, hasNoteMaterial } from "../core/notes/notePrompt.ts";
 import { exportNoteToMarkdown, suggestFilename } from "../core/notes/exportMarkdown.ts";
+import { resolveModelPath } from "../core/modelPaths.ts";
 import { IPC, type ServicesStatus } from "../shared/ipc.ts";
 import type { TranscriptSegment } from "../core/transcript/types.ts";
 
@@ -91,17 +92,26 @@ function initServices(): void {
   whisper = new WhisperClient({ baseUrl: WHISPER_URL });
   llama = new LlamaClient({ baseUrl: LLAMA_URL });
 
-  const modelDir = path.join(app.getPath("userData"), "models");
-  const whisperModel = repo.getSetting("whisperModel") ?? "ggml-base.en.bin";
-  const llamaModel = repo.getSetting("llamaModel") ?? "";
+  // A packaged build ships a model inside the bundle so it works on first
+  // launch; anything the user downloads later takes precedence.
+  const userModelDir = path.join(app.getPath("userData"), "models");
+  const bundledModelDir = app.isPackaged ? resourcePath("models") : null;
+  const findModel = (name: string): string | null =>
+    resolveModelPath({ name, userModelDir, bundledModelDir, exists: existsSync, join: path.join })
+      ?.path ?? null;
+
+  const whisperModelPath = findModel(repo.getSetting("whisperModel") ?? "ggml-base.en.bin");
+  const llamaModelName = repo.getSetting("llamaModel") ?? "";
+  const llamaModelPath = llamaModelName ? findModel(llamaModelName) : null;
 
   whisperService = new LocalService({
     name: "whisper",
-    binaryPath: resourcePath("bin", "whisper-server"),
+    // No model means no point spawning the server; the UI explains instead.
+    binaryPath: whisperModelPath ? resourcePath("bin", "whisper-server") : null,
     args: [
       "--host", "127.0.0.1",
       "--port", String(WHISPER_PORT),
-      "--model", path.join(modelDir, whisperModel),
+      "--model", whisperModelPath ?? "",
       // Leave headroom: the UI and the tap helper share this machine.
       "--threads", String(Math.max(2, Math.floor(availableParallelism() / 2))),
     ],
@@ -110,11 +120,11 @@ function initServices(): void {
 
   llamaService = new LocalService({
     name: "llama",
-    binaryPath: llamaModel ? resourcePath("bin", "llama-server") : null,
+    binaryPath: llamaModelPath ? resourcePath("bin", "llama-server") : null,
     args: [
       "--host", "127.0.0.1",
       "--port", String(LLAMA_PORT),
-      "--model", path.join(modelDir, llamaModel),
+      "--model", llamaModelPath ?? "",
       "--ctx-size", "16384",
     ],
     healthCheck: () => llama.isHealthy(),

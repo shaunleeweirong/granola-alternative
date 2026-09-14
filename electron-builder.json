@@ -1,0 +1,41 @@
+{
+  "appId": "com.shaunlee.meetingnotes",
+  "productName": "Meeting Notes",
+  "copyright": "MIT",
+  "directories": { "output": "release", "buildResources": "build" },
+  "files": [
+    "dist/**/*",
+    "package.json",
+    "!**/*.map",
+    "!**/*.ts"
+  ],
+  "extraResources": [
+    { "from": "resources/bin", "to": "bin" },
+    { "from": "resources/models", "to": "models", "filter": ["**/*.bin"] }
+  ],
+  "asarUnpack": ["**/*.node"],
+  "mac": {
+    "category": "public.app-category.productivity",
+    "target": [{ "target": "dmg", "arch": ["arm64"] }],
+    "darkModeSupport": true,
+    "minimumSystemVersion": "14.2",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "build/entitlements.mac.plist",
+    "entitlementsInherit": "build/entitlements.mac.plist",
+    "extendInfo": {
+      "NSMicrophoneUsageDescription": "Meeting Notes records your microphone so your side of the conversation appears in the transcript.",
+      "NSAudioCaptureUsageDescription": "Meeting Notes records the audio playing on this Mac so the other people on the call appear in the transcript.",
+      "NSCameraUsageDescription": "Not used. Meeting Notes never accesses the camera.",
+      "LSMinimumSystemVersion": "14.2"
+    }
+  },
+  "dmg": {
+    "title": "Meeting Notes",
+    "contents": [
+      { "x": 140, "y": 200, "type": "file" },
+      { "x": 400, "y": 200, "type": "link", "path": "/Applications" }
+    ]
+  },
+  "publish": null
+}

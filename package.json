@@ -27,7 +27,8 @@
     "preflight": "bash scripts/preflight.sh",
     "rebuild:node": "npm rebuild better-sqlite3",
     "rebuild:electron": "electron-rebuild -f -o better-sqlite3",
-    "pretest": "node scripts/ensure-node-abi.mjs"
+    "pretest": "node scripts/ensure-node-abi.mjs",
+    "package:mac": "npm run build && electron-builder --mac --arm64"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3"
@@ -42,6 +43,7 @@
     "@typescript-eslint/parser": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^44.3.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^8.57.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
