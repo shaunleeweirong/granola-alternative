@@ -18,7 +18,7 @@ const userDataDir = isMac
   ? path.join(os.homedir(), "Library", "Application Support", "granola-alternative")
   : path.join(os.homedir(), ".config", "granola-alternative");
 const modelDir = path.join(userDataDir, "models");
-const WHISPER_MODEL = "ggml-base.en.bin";
+const WHISPER_MODEL = "ggml-large-v3-turbo.bin";
 
 const colour = process.stdout.isTTY && !process.env.NO_COLOR;
 const paint = (code, text) => (colour ? `[${code}m${text}[0m` : text);

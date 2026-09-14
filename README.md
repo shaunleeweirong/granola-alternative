@@ -44,7 +44,7 @@ Apple Silicon, macOS 14.2 or later. Everything below is only needed to work on t
 - macOS 14.2 or later (CoreAudio process taps)
 - Node.js 22+
 - Xcode command line tools, for the Swift audio helper (`xcode-select --install`)
-- A whisper.cpp `whisper-server` binary and a GGML model, for transcription
+- A whisper.cpp `whisper-server` binary and a GGML model, for transcription (default: `ggml-large-v3-turbo.bin`)
 - Optionally a llama.cpp `llama-server` binary and a GGUF model, for note generation
 
 The app launches and records without the two servers; it reports what is missing rather than failing to start.

@@ -100,7 +100,7 @@ function initServices(): void {
     resolveModelPath({ name, userModelDir, bundledModelDir, exists: existsSync, join: path.join })
       ?.path ?? null;
 
-  const whisperModelPath = findModel(repo.getSetting("whisperModel") ?? "ggml-base.en.bin");
+  const whisperModelPath = findModel(repo.getSetting("whisperModel") ?? "ggml-large-v3-turbo.bin");
   const llamaModelName = repo.getSetting("llamaModel") ?? "";
   const llamaModelPath = llamaModelName ? findModel(llamaModelName) : null;
 

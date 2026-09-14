@@ -1,6 +1,6 @@
 # Installing the .dmg on another Mac
 
-The `.dmg` is a complete, self-contained app. The Mac you install it on needs **no Terminal, no Homebrew, no Node, and no compiler**. Everything is inside the bundle: the app, the system-audio recorder, the speech engine, and the speech model.
+The `.dmg` is a complete, self-contained app. It is large, roughly 1.8 GB, because the speech model travels inside it. The Mac you install it on needs **no Terminal, no Homebrew, no Node, and no compiler**. Everything is inside the bundle: the app, the system-audio recorder, the speech engine, and the speech model.
 
 **Requirements:** Apple Silicon Mac (M1 or later), macOS 14.2 or later.
 
@@ -65,12 +65,12 @@ Run the echo test from the setup guide: play a video of someone talking, stay si
 | The app | Electron, the UI, the local database |
 | System-audio recorder | The Swift CoreAudio helper |
 | Speech engine | whisper.cpp, built on Apple Silicon |
-| Speech model | `ggml-base.en.bin`, English, roughly 150 MB |
+| Speech model | `ggml-large-v3-turbo.bin`, roughly 1.6 GB. Near the accuracy of Whisper's largest model, comfortably faster than real time on Apple Silicon. |
 
 | Not included | Why |
 | --- | --- |
 | Note-writing model | A useful one is several gigabytes. Transcription works fully without it; the "Generate notes" button explains what to add. |
-| A larger speech model | `base.en` is the fast, small default. Drop a bigger `ggml-*.bin` into `~/Library/Application Support/Meeting Notes/models/` and it takes precedence over the bundled one, with no new build needed. |
+| A different speech model | Drop any `ggml-*.bin` into `~/Library/Application Support/Meeting Notes/models/` and it takes precedence over the bundled one, with no new build needed. Use this to trade accuracy for speed or download size. |
 
 ## Building a new .dmg
 

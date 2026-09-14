@@ -14,7 +14,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN_DIR="$ROOT/resources/bin"
 CACHE_DIR="$ROOT/.cache"
 MODEL_DIR="$HOME/Library/Application Support/granola-alternative/models"
-MODEL_NAME="ggml-base.en.bin"
+MODEL_NAME="ggml-large-v3-turbo.bin"
 MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$MODEL_NAME"
 WHISPER_REPO="https://github.com/ggml-org/whisper.cpp.git"
 
@@ -136,7 +136,7 @@ if [ -s "$MODEL_DIR/$MODEL_NAME" ]; then
   ok "already downloaded ($(du -h "$MODEL_DIR/$MODEL_NAME" | cut -f1))"
 else
   mkdir -p "$MODEL_DIR"
-  note "about 150 MB, downloading..."
+  note "about 1.6 GB, downloading..."
   # Write to a temp name first so an interrupted download is never mistaken
   # for a finished one.
   curl -fL --progress-bar "$MODEL_URL" -o "$MODEL_DIR/$MODEL_NAME.partial"

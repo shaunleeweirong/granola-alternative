@@ -9,7 +9,7 @@
  * Pure so the precedence is testable without a filesystem or Electron.
  */
 export interface ModelLookup {
-  /** File name, e.g. "ggml-base.en.bin". */
+  /** File name, e.g. "ggml-large-v3-turbo.bin". */
   name: string;
   /** Writable per-user model directory. Searched first. */
   userModelDir: string | null;
