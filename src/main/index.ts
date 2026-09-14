@@ -71,7 +71,8 @@ function createWindow(): void {
 
   const devServer = process.env.VITE_DEV_SERVER_URL;
   if (devServer) void mainWindow.loadURL(devServer);
-  else void mainWindow.loadFile(path.join(dirname, "..", "renderer", "index.html"));
+  // __dirname is dist/src/main at runtime; vite writes the UI to dist/renderer.
+  else void mainWindow.loadFile(path.join(dirname, "..", "..", "renderer", "index.html"));
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);

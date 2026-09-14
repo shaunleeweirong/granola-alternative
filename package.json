@@ -18,10 +18,12 @@
     "test:core": "node --test --test-reporter=spec \"test/core/**/*.test.ts\"",
     "lint": "eslint src test",
     "dev": "vite",
-    "start": "npm run build:main && electron dist/main/index.js",
+    "start": "npm run build && electron dist/src/main/index.js",
     "build:tap": "node scripts/build-audio-tap.mjs",
-    "postinstall": "node scripts/build-audio-tap.mjs",
-    "verify": "npm run typecheck && npm run lint && npm test && npm run build"
+    "postinstall": "node scripts/build-audio-tap.mjs || echo '[audio-tap] not built yet - run: npm run build:tap'",
+    "verify": "npm run typecheck && npm run lint && npm test && npm run build",
+    "doctor": "node scripts/doctor.mjs",
+    "setup:mac": "bash scripts/setup-mac.sh"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0"
