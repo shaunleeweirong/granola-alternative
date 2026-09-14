@@ -84,13 +84,22 @@ jobs:
         id: whisper-cache
         uses: actions/cache@v4
         with:
-          path: .cache/whisper.cpp/build
-          key: whisper-${{ runner.os }}-${{ runner.arch }}-v1
+          path: .cache/whisper.cpp
+          key: whisper-${{ runner.os }}-${{ runner.arch }}-v2
 
       - name: Build the speech engine
         run: |
           set -euo pipefail
           mkdir -p .cache
+
+          # A restored cache can leave the directory present but incomplete, and
+          # git clone refuses to write into a non-empty directory. Start clean
+          # unless there is a real repository here.
+          if [ -d .cache/whisper.cpp ] && [ ! -d .cache/whisper.cpp/.git ]; then
+            echo "whisper.cpp directory exists without a repository; starting fresh"
+            rm -rf .cache/whisper.cpp
+          fi
+
           if [ ! -d .cache/whisper.cpp/.git ]; then
             git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git .cache/whisper.cpp
           fi
