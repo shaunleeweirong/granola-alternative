@@ -9,6 +9,7 @@ export const IPC = {
   transcriptSegment: "transcript:segment",
   transcriptError: "transcript:error",
   audioSystemSilent: "audio:system-silent",
+  audioSystemStatus: "audio:system-status",
   permissionsSystemAudio: "permissions:system-audio",
   permissionsRequestSystemAudio: "permissions:request-system-audio",
   notesGenerate: "notes:generate",
@@ -44,6 +45,26 @@ export interface StopRecordingResult {
 export interface LevelUpdate {
   channel: Channel;
   rms: number;
+}
+
+/**
+ * Health of the system-audio ("Them") capture during a recording.
+ *
+ * The helper is a separate process and it can die mid-meeting, most plausibly
+ * when the output device changes under it (headphones, AirPods, a Bluetooth
+ * speaker). Losing it silently costs the entire remote half of the
+ * conversation, so its state is tracked explicitly rather than announced once
+ * in a message that scrolls away.
+ */
+export type SystemAudioState = "capturing" | "recovering" | "lost" | "unsupported";
+
+export interface SystemAudioStatus {
+  state: SystemAudioState;
+  /** The helper's own last words, so the next failure diagnoses itself. */
+  detail?: string | null;
+  /** Which recovery attempt is in flight, for "reconnecting, 2 of 3". */
+  attempt?: number;
+  maxAttempts?: number;
 }
 
 export interface SegmentEvent {
@@ -148,5 +169,6 @@ export interface RendererApi {
   onTranscriptError(handler: (event: TranscriptErrorEvent) => void): () => void;
   onGenerateChunk(handler: (event: GenerateChunkEvent) => void): () => void;
   onSystemAudioSilent(handler: () => void): () => void;
+  onSystemAudioStatus(handler: (status: SystemAudioStatus) => void): () => void;
   onModelProgress(handler: (status: ModelStatus) => void): () => void;
 }

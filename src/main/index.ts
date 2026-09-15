@@ -198,6 +198,7 @@ function initServices(): void {
     onError: (message, fatal) =>
       send(IPC.transcriptError, { sessionId: controller.current?.sessionId ?? "", message, fatal }),
     onSystemAudioSilent: () => send(IPC.audioSystemSilent, {}),
+    onSystemAudioStatus: (status) => send(IPC.audioSystemStatus, status),
   });
 }
 

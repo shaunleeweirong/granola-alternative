@@ -152,6 +152,21 @@ export function App(): JSX.Element {
   }, [model]);
 
   const banner = useMemo(() => {
+    // First, because it is the only failure that silently costs half the
+    // conversation, and it is happening right now rather than in a past message.
+    const systemAudio = state.systemAudio;
+    if (state.isRecording && systemAudio?.state === "recovering") {
+      return {
+        tone: "warn" as const,
+        text: `System audio stopped, reconnecting (attempt ${systemAudio.attempt} of ${systemAudio.maxAttempts}). ${systemAudio.detail ?? ""}`.trim(),
+      };
+    }
+    if (state.isRecording && systemAudio?.state === "lost") {
+      return {
+        tone: "error" as const,
+        text: `System audio has stopped and could not be restarted, so only your microphone is being recorded from here on. ${systemAudio.detail ?? ""}`.trim(),
+      };
+    }
     if (state.error) return { tone: "error" as const, text: state.error };
     if (generateError) return { tone: "error" as const, text: generateError };
     if (state.warning) return { tone: "warn" as const, text: state.warning };
@@ -185,7 +200,7 @@ export function App(): JSX.Element {
       };
     }
     return null;
-  }, [state.error, state.warning, generateError, status, model, modelPercent]);
+  }, [state.error, state.warning, state.systemAudio, state.isRecording, generateError, status, model, modelPercent]);
 
   if (model && !model.installed && !setupDismissed) {
     return (

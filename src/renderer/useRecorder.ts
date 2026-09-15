@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { buildMicConstraints } from "./audio/micConstraints.ts";
 import { createCapturePipeline, type CapturePipeline } from "./audio/pcmWorklet.ts";
-import type { RendererApi, StartRecordingResult } from "../shared/ipc.ts";
+import type { RendererApi, StartRecordingResult, SystemAudioStatus } from "../shared/ipc.ts";
 import type { TranscriptSegment } from "../core/transcript/types.ts";
 
 declare global {
@@ -21,6 +21,11 @@ export interface RecorderState {
   segments: TranscriptSegment[];
   warning: string | null;
   error: string | null;
+  /**
+   * Health of the "Them" capture. State rather than a message, so a helper that
+   * dies mid-meeting stays on screen instead of scrolling away unnoticed.
+   */
+  systemAudio: SystemAudioStatus | null;
 }
 
 const INITIAL: RecorderState = {
@@ -33,6 +38,7 @@ const INITIAL: RecorderState = {
   segments: [],
   warning: null,
   error: null,
+  systemAudio: null,
 };
 
 export function useRecorder(onFinished?: (noteId: number) => void) {
@@ -72,11 +78,16 @@ export function useRecorder(onFinished?: (noteId: number) => void) {
       }));
     });
 
+    const offSystemAudio = window.api.onSystemAudioStatus((systemAudio) => {
+      setState((prev) => ({ ...prev, systemAudio }));
+    });
+
     return () => {
       offSegment();
       offLevel();
       offError();
       offSilent();
+      offSystemAudio();
     };
   }, []);
 

@@ -8,6 +8,10 @@
  *   --mode deny     emit a permission_denied error and exit
  *   --mode silent   emit nothing (exercises the start timeout)
  *   --mode crash    emit a start event, then exit mid-stream
+ *   --mode crash-once  crash on the first spawn, behave normally afterwards
+ *   --crash-spawns 1,3  crash on these spawn numbers only. Both need
+ *                   --state <file> to count across processes, which is how the
+ *                   host's restart path gets exercised end to end.
  *   --mode split    write JSON events and samples across deliberately awkward
  *                   read boundaries: half a JSON line, and an odd byte count
  *   --mode noise    write a non-JSON line to stderr
@@ -21,7 +25,23 @@ const readFlag = (name, fallback) => {
   return index >= 0 && args[index + 1] !== undefined ? args[index + 1] : fallback;
 };
 
-const mode = readFlag("--mode", "start");
+let mode = readFlag("--mode", "start");
+const statePath = readFlag("--state", null);
+const crashSpawns = readFlag("--crash-spawns", null);
+
+// Which spawn this is cannot live in memory: the whole point of these modes is
+// that the process dies and a fresh one replaces it, so the count goes on disk.
+if (mode === "crash-once" || crashSpawns) {
+  const fs = await import("node:fs");
+  let spawnNumber = 1;
+  if (statePath) {
+    const previous = fs.existsSync(statePath) ? Number(fs.readFileSync(statePath, "utf8")) : 0;
+    spawnNumber = (Number.isFinite(previous) ? previous : 0) + 1;
+    fs.writeFileSync(statePath, String(spawnNumber));
+  }
+  const crashOn = crashSpawns ? crashSpawns.split(",").map(Number) : [1];
+  mode = crashOn.includes(spawnNumber) ? "crash" : "start";
+}
 const chunks = Number(readFlag("--chunks", "3"));
 const chunkBytes = Number(readFlag("--chunk-bytes", "320"));
 

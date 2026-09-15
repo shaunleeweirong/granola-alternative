@@ -9,6 +9,7 @@ import { computePcm16Rms } from "../core/audio/format.ts";
 import type { Channel, TranscriptSegment } from "../core/transcript/types.ts";
 import { AudioTapHost, type AudioTapHandlers } from "./audioTapHost.ts";
 import type { WhisperClient } from "./whisperClient.ts";
+import type { SystemAudioStatus } from "../shared/ipc.ts";
 
 /**
  * Owns one recording end to end: the system-audio helper, the microphone feed
@@ -29,10 +30,36 @@ export interface RecordingControllerDeps {
   onLevel?: (channel: Channel, rms: number) => void;
   onError?: (message: string, fatal: boolean) => void;
   onSystemAudioSilent?: () => void;
+  onSystemAudioStatus?: (status: SystemAudioStatus) => void;
+  /** Overridable so tests exercise the recovery path without waiting it out. */
+  tapRestartDelaysMs?: number[];
+  tapStableMs?: number;
 }
 
 /** Warn if the tap has produced nothing audible for this long (FR-7). */
 const SILENCE_WARNING_MS = 45_000;
+
+/**
+ * Backoff before each attempt to bring the system-audio helper back.
+ *
+ * The helper dying mid-meeting used to be reported once and then simply
+ * accepted, which meant the rest of the call was recorded microphone-only and
+ * the remote half of the conversation was lost with no way to recover it. The
+ * most plausible cause is the output device changing underneath it, which is
+ * exactly the kind of transient a restart fixes. Three attempts: enough to ride
+ * out a device switch, few enough to give up rather than thrash.
+ */
+const TAP_RESTART_DELAYS_MS = [400, 1_200, 3_000];
+
+/**
+ * How long a restarted helper must survive before its recovery counts as a
+ * success and the attempt budget is refilled.
+ *
+ * Starting is not the same as staying up. A helper that announces itself and
+ * then dies a moment later will do so every time, and crediting it for the
+ * start alone turns "three attempts then give up" into an endless restart loop.
+ */
+const TAP_STABLE_MS = 15_000;
 
 export interface ActiveRecording {
   sessionId: string;
@@ -51,6 +78,14 @@ export class RecordingController {
   private silenceTimer: NodeJS.Timeout | null = null;
   private silenceWarned = false;
   private transcriptionFailed = false;
+  /** How many recovery attempts have been spent on the current failure. */
+  private tapAttempt = 0;
+  /** The helper's own last error, carried into the status so it is not lost. */
+  private lastTapError: string | null = null;
+  /** Resolves the pending restart backoff early when the recording stops. */
+  private cancelRestartWait: (() => void) | null = null;
+  /** Fires once a restarted helper has proven it can stay up. */
+  private tapStableTimer: NodeJS.Timeout | null = null;
 
   constructor(deps: RecordingControllerDeps) {
     this.deps = deps;
@@ -109,7 +144,21 @@ export class RecordingController {
       },
     });
 
+    this.tapAttempt = 0;
+    this.lastTapError = null;
+
     const tapResult = await this.startTap();
+    this.emitSystemAudio(
+      tapResult.systemAudioReady
+        ? { state: "capturing" }
+        : {
+            state: tapResult.systemAudioReason === "unsupported" ? "unsupported" : "lost",
+            detail:
+              tapResult.systemAudioReason === "unsupported"
+                ? null
+                : tapResult.systemAudioReason ?? null,
+          }
+    );
     this.startSilenceWatchdog();
 
     return { sessionId, noteId, ...tapResult };
@@ -130,6 +179,10 @@ export class RecordingController {
     this.active = null;
     this.session = null;
     this.stopSilenceWatchdog();
+    // A restart waiting out its backoff would otherwise spawn a helper for a
+    // recording that has already finished.
+    this.cancelRestartWait?.();
+    this.clearAttemptReset();
 
     await this.tap?.stop().catch(() => {});
     this.tap = null;
@@ -165,8 +218,12 @@ export class RecordingController {
           this.silenceWarned = false;
         }
       },
-      onError: (error) => this.deps.onError?.(error.message, false),
-      onExit: () => this.deps.onError?.("System audio capture stopped unexpectedly", false),
+      // Kept, not announced: a non-fatal helper error is not worth a banner of
+      // its own, but it is very often the explanation for the exit that follows.
+      onError: (error) => {
+        this.lastTapError = error.message;
+      },
+      onExit: (code, signal) => this.handleTapExit(code, signal),
     };
 
     try {
@@ -180,6 +237,106 @@ export class RecordingController {
         systemAudioReason: (error as Error).message,
       };
     }
+  }
+
+  private emitSystemAudio(status: SystemAudioStatus): void {
+    this.deps.onSystemAudioStatus?.(status);
+  }
+
+  /**
+   * The helper died while a recording was running.
+   *
+   * Prefer its own last words over the exit code: "Aggregate device
+   * disappeared" tells the user something, "exited with code 3" does not.
+   */
+  private handleTapExit(code: number | null, signal: NodeJS.Signals | null): void {
+    this.tap = null;
+    this.clearAttemptReset();
+    if (!this.active) return;
+
+    const detail =
+      this.lastTapError ??
+      (signal
+        ? `The audio helper was killed by ${signal}.`
+        : `The audio helper exited with code ${code ?? "unknown"}.`);
+
+    void this.recoverTap(detail);
+  }
+
+  /** Bring the helper back, with backoff, until it works or the attempts run out. */
+  private async recoverTap(detail: string): Promise<void> {
+    if (!this.active) return;
+
+    const delays = this.deps.tapRestartDelaysMs ?? TAP_RESTART_DELAYS_MS;
+    const delay = delays[this.tapAttempt];
+    if (delay === undefined) {
+      this.emitSystemAudio({ state: "lost", detail });
+      return;
+    }
+
+    this.tapAttempt += 1;
+    this.emitSystemAudio({
+      state: "recovering",
+      detail,
+      attempt: this.tapAttempt,
+      maxAttempts: delays.length,
+    });
+
+    await this.waitBeforeRestart(delay);
+    if (!this.active) return;
+
+    const result = await this.startTap();
+
+    // The recording can end while the helper is starting. Without this the
+    // freshly spawned process outlives the meeting: stop() has already run and
+    // cleared its reference, so nobody is left to shut it down.
+    if (!this.active) {
+      await this.tap?.stop().catch(() => {});
+      this.tap = null;
+      return;
+    }
+
+    if (result.systemAudioReady) {
+      this.emitSystemAudio({ state: "capturing" });
+      // The budget is refilled only once it has stayed up, so a helper that
+      // starts and immediately dies still runs out of attempts.
+      this.scheduleAttemptReset();
+      return;
+    }
+
+    await this.recoverTap(result.systemAudioReason ?? detail);
+  }
+
+  private scheduleAttemptReset(): void {
+    this.clearAttemptReset();
+    this.tapStableTimer = setTimeout(() => {
+      this.tapAttempt = 0;
+      this.lastTapError = null;
+      this.tapStableTimer = null;
+    }, this.deps.tapStableMs ?? TAP_STABLE_MS);
+    this.tapStableTimer.unref?.();
+  }
+
+  private clearAttemptReset(): void {
+    if (this.tapStableTimer) clearTimeout(this.tapStableTimer);
+    this.tapStableTimer = null;
+  }
+
+  private waitBeforeRestart(ms: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        this.cancelRestartWait = null;
+        resolve();
+      }, ms);
+      timer.unref?.();
+      // Resolved rather than abandoned on cancellation, so the caller reaches
+      // its own `active` check and unwinds instead of leaking a pending promise.
+      this.cancelRestartWait = () => {
+        clearTimeout(timer);
+        this.cancelRestartWait = null;
+        resolve();
+      };
+    });
   }
 
   private startSilenceWatchdog(): void {

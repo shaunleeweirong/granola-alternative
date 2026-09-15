@@ -37,6 +37,7 @@ const api: RendererApi = {
   onTranscriptError: (handler) => subscribe(IPC.transcriptError, handler),
   onGenerateChunk: (handler) => subscribe(IPC.notesGenerateChunk, handler),
   onSystemAudioSilent: (handler) => subscribe(IPC.audioSystemSilent, () => handler()),
+  onSystemAudioStatus: (handler) => subscribe(IPC.audioSystemStatus, handler),
   onModelProgress: (handler) => subscribe(IPC.modelProgress, handler),
 };
 
