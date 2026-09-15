@@ -5,7 +5,9 @@ out/
 .DS_Store
 .env
 coverage/
-models/
+# Anchored: a bare `models/` matches any directory of that name at any depth,
+# which silently excluded src/core/models/ from a commit.
+/models/
 
 # Packaging outputs and downloaded binaries/models
 release/

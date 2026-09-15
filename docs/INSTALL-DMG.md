@@ -58,6 +58,16 @@ Run the echo test from the setup guide: play a video of someone talking, stay si
 
 ---
 
+## The first-launch download
+
+The installer is about 110 MB. The speech model is not inside it.
+
+The first time you open the app it asks to download the model, roughly 834 MB, and shows a progress bar. That happens once per Mac. The model is kept in your user folder rather than inside the app, so installing a later version of the app does not download it again.
+
+If the download is interrupted, reopening the app picks up from where it stopped rather than starting over.
+
+You can press **Not now** and use the app without it. Meetings will still record and save; they just will not be transcribed until the model is there, and the banner at the top offers the download again.
+
 ## What is and is not in the bundle
 
 | Included | Notes |
@@ -65,18 +75,18 @@ Run the echo test from the setup guide: play a video of someone talking, stay si
 | The app | Electron, the UI, the local database |
 | System-audio recorder | The Swift CoreAudio helper |
 | Speech engine | whisper.cpp, built on Apple Silicon |
-| Speech model | `ggml-large-v3-turbo.bin`, roughly 1.6 GB. Near the accuracy of Whisper's largest model, comfortably faster than real time on Apple Silicon. |
 
 | Not included | Why |
 | --- | --- |
+| Speech model | `ggml-large-v3-turbo-q8_0.bin`, about 834 MB, downloaded on first launch. 8-bit quantisation of the same model Whisper calls large-v3-turbo: near the accuracy of Whisper's largest model, comfortably faster than real time on Apple Silicon. |
 | Note-writing model | A useful one is several gigabytes. Transcription works fully without it; the "Generate notes" button explains what to add. |
-| A different speech model | Drop any `ggml-*.bin` into `~/Library/Application Support/Meeting Notes/models/` and it takes precedence over the bundled one, with no new build needed. Use this to trade accuracy for speed or download size. |
+| A different speech model | Drop any `ggml-*.bin` into `~/Library/Application Support/Meeting Notes/models/` and it takes precedence, with no new build needed. Use this to trade accuracy for speed or download size. |
 
 ## Building a new .dmg
 
 On GitHub: **Actions** → **Build macOS app** → **Run workflow**. Tick *"Also publish a GitHub Release"* if you want a permanent download link rather than a 30-day artifact.
 
-The run takes roughly 15 to 25 minutes. It runs the full test suite first and fails the build rather than shipping something broken, then verifies that the audio helper, speech engine, model and both permission strings are actually present in the finished bundle.
+The run takes roughly 15 to 25 minutes. It runs the full test suite first and fails the build rather than shipping something broken, then verifies that the audio helper, speech engine and both permission strings are actually present in the finished bundle, that the speech engine actually launches from inside the signed app, and that no model has crept back into it.
 
 ## If the app will not open
 

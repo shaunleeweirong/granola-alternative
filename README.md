@@ -44,7 +44,7 @@ Apple Silicon, macOS 14.2 or later. Everything below is only needed to work on t
 - macOS 14.2 or later (CoreAudio process taps)
 - Node.js 22+
 - Xcode command line tools, for the Swift audio helper (`xcode-select --install`)
-- A whisper.cpp `whisper-server` binary and a GGML model, for transcription (default: `ggml-large-v3-turbo.bin`)
+- A whisper.cpp `whisper-server` binary and a GGML model, for transcription (default: `ggml-large-v3-turbo-q8_0.bin`, fetched on first launch)
 - Optionally a llama.cpp `llama-server` binary and a GGUF model, for note generation
 
 The app launches and records without the two servers; it reports what is missing rather than failing to start.
@@ -58,7 +58,7 @@ npm run dev          # renderer dev server
 npm start            # build main and launch Electron
 ```
 
-Place local inference binaries in `resources/bin/` (`whisper-server`, `llama-server`). Models go in the app's `userData/models` directory, or in `resources/models/` to be bundled into a packaged build; a user-installed model always takes precedence over a bundled one.
+Place local inference binaries in `resources/bin/` (`whisper-server`, `llama-server`). Models go in the app's `userData/models` directory, which is also where the app downloads the speech model on first launch. Packaged builds deliberately ship no model: it is fetched once and kept, so an app update does not download it again. A model in `resources/models/` is still honoured for development builds, and a user-installed model always wins.
 
 `npm run package:mac` builds an installable `.dmg` locally, if you are on a Mac.
 

@@ -14,7 +14,14 @@ import { LocalService } from "./localService.ts";
 import { buildNoteMessages, chunkTranscript, hasNoteMaterial } from "../core/notes/notePrompt.ts";
 import { exportNoteToMarkdown, suggestFilename } from "../core/notes/exportMarkdown.ts";
 import { resolveModelPath } from "../core/modelPaths.ts";
-import { IPC, type ServicesStatus } from "../shared/ipc.ts";
+import { WHISPER_MODEL } from "../core/models/catalog.ts";
+import {
+  downloadModel,
+  isModelInstalled,
+  partialBytes,
+  type DownloadProgress,
+} from "./modelDownloader.ts";
+import { IPC, type ModelStatus, type ServicesStatus } from "../shared/ipc.ts";
 import type { TranscriptSegment } from "../core/transcript/types.ts";
 
 // The main process is emitted as CommonJS (see tsconfig.main.json), so
@@ -46,6 +53,11 @@ let whisper: WhisperClient;
 let llama: LlamaClient;
 let whisperService: LocalService;
 let llamaService: LocalService;
+
+/** Set only while a model download is in flight. */
+let modelDownload: { controller: AbortController; progress: DownloadProgress } | null = null;
+let modelError: string | null = null;
+let userModelDir = "";
 
 const send = (channel: string, payload: unknown): void => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
@@ -85,33 +97,20 @@ function createWindow(): void {
   });
 }
 
-function initServices(): void {
-  const dbPath = path.join(app.getPath("userData"), "notes.db");
-  repo = new NotesRepo(new Database(dbPath));
-
-  whisper = new WhisperClient({ baseUrl: WHISPER_URL });
-  llama = new LlamaClient({ baseUrl: LLAMA_URL });
-
-  // A packaged build ships a model inside the bundle so it works on first
-  // launch; anything the user downloads later takes precedence.
-  const userModelDir = path.join(app.getPath("userData"), "models");
-  const bundledModelDir = app.isPackaged ? resourcePath("models") : null;
-  const findModel = (name: string): string | null =>
-    resolveModelPath({ name, userModelDir, bundledModelDir, exists: existsSync, join: path.join })
-      ?.path ?? null;
-
-  const whisperModelPath = findModel(repo.getSetting("whisperModel") ?? "ggml-large-v3-turbo.bin");
-  const llamaModelName = repo.getSetting("llamaModel") ?? "";
-  const llamaModelPath = llamaModelName ? findModel(llamaModelName) : null;
-
-  whisperService = new LocalService({
+/**
+ * The speech engine, pointed at a model. Built by a function rather than
+ * inline so it can be replaced once a download finishes, instead of asking the
+ * user to quit and reopen the app the first time they ever use it.
+ */
+function createWhisperService(modelPath: string | null): LocalService {
+  return new LocalService({
     name: "whisper",
     // No model means no point spawning the server; the UI explains instead.
-    binaryPath: whisperModelPath ? resourcePath("bin", "whisper-server") : null,
+    binaryPath: modelPath ? resourcePath("bin", "whisper-server") : null,
     args: [
       "--host", "127.0.0.1",
       "--port", String(WHISPER_PORT),
-      "--model", whisperModelPath ?? "",
+      "--model", modelPath ?? "",
       // Leave headroom: the UI and the tap helper share this machine.
       "--threads", String(Math.max(2, Math.floor(availableParallelism() / 2))),
     ],
@@ -120,6 +119,46 @@ function initServices(): void {
     // can only ever surface as "fetch failed".
     onLog: (line) => console.log(`[service] ${line}`),
   });
+}
+
+async function currentModelStatus(): Promise<ModelStatus> {
+  const installed = await isModelInstalled(userModelDir, WHISPER_MODEL);
+  return {
+    installed,
+    displayName: WHISPER_MODEL.displayName,
+    description: WHISPER_MODEL.description,
+    approxBytes: WHISPER_MODEL.approxBytes,
+    downloading: modelDownload !== null,
+    receivedBytes: modelDownload?.progress.receivedBytes ?? 0,
+    totalBytes: modelDownload?.progress.totalBytes ?? null,
+    resumableBytes: installed ? 0 : await partialBytes(userModelDir, WHISPER_MODEL),
+    error: modelError,
+  };
+}
+
+const pushModelStatus = async (): Promise<void> => send(IPC.modelProgress, await currentModelStatus());
+
+function initServices(): void {
+  const dbPath = path.join(app.getPath("userData"), "notes.db");
+  repo = new NotesRepo(new Database(dbPath));
+
+  whisper = new WhisperClient({ baseUrl: WHISPER_URL });
+  llama = new LlamaClient({ baseUrl: LLAMA_URL });
+
+  // The speech model is downloaded on first launch and lives here. A build may
+  // still carry one inside the bundle (a developer build, or a side-loaded
+  // copy), and that is searched second.
+  userModelDir = path.join(app.getPath("userData"), "models");
+  const bundledModelDir = app.isPackaged ? resourcePath("models") : null;
+  const findModel = (name: string): string | null =>
+    resolveModelPath({ name, userModelDir, bundledModelDir, exists: existsSync, join: path.join })
+      ?.path ?? null;
+
+  const whisperModelPath = findModel(repo.getSetting("whisperModel") ?? WHISPER_MODEL.fileName);
+  const llamaModelName = repo.getSetting("llamaModel") ?? "";
+  const llamaModelPath = llamaModelName ? findModel(llamaModelName) : null;
+
+  whisperService = createWhisperService(whisperModelPath);
 
   llamaService = new LocalService({
     name: "llama",
@@ -307,10 +346,62 @@ function registerIpc(): void {
       languageModelReady,
       systemAudioSupported: systemAudioSupported(),
       systemAudioGranted: existsSync(resourcePath("bin", "meeting-audio-tap")),
-      transcriptionReason: transcriptionReady ? null : whisperService?.reason ?? null,
+      transcriptionReason: transcriptionReady
+        ? null
+        : whisperService?.isAvailable === false && !(await isModelInstalled(userModelDir, WHISPER_MODEL))
+          ? "The speech model has not been downloaded yet."
+          : whisperService?.reason ?? null,
       transcriptionStarting: !transcriptionReady && whisperService?.status === "starting",
       transcriptionLog: transcriptionReady ? [] : whisperService?.log ?? [],
     };
+  });
+
+  ipcMain.handle(IPC.modelStatus, async (): Promise<ModelStatus> => currentModelStatus());
+
+  ipcMain.handle(IPC.modelCancel, async () => {
+    modelDownload?.controller.abort();
+  });
+
+  ipcMain.handle(IPC.modelDownload, async (): Promise<ModelStatus> => {
+    // Two windows, or an impatient double-click, must not start two transfers
+    // into the same file.
+    if (modelDownload) return currentModelStatus();
+    if (await isModelInstalled(userModelDir, WHISPER_MODEL)) return currentModelStatus();
+
+    const controller = new AbortController();
+    modelDownload = { controller, progress: { receivedBytes: 0, totalBytes: null } };
+    modelError = null;
+    void pushModelStatus();
+
+    try {
+      const modelPath = await downloadModel({
+        spec: WHISPER_MODEL,
+        destDir: userModelDir,
+        signal: controller.signal,
+        onProgress: (progress) => {
+          if (modelDownload) modelDownload.progress = progress;
+          void pushModelStatus();
+        },
+      });
+
+      repo.setSetting("whisperModel", WHISPER_MODEL.fileName);
+      modelDownload = null;
+
+      // Start transcribing now rather than after a restart: this is the first
+      // thing a new user does, and "quit and reopen" is a poor welcome.
+      await whisperService.stop();
+      whisperService = createWhisperService(modelPath);
+      void whisperService.start();
+    } catch (error) {
+      modelDownload = null;
+      // Cancelling is a choice, not a fault. Reporting it in red alongside
+      // genuine failures teaches people to ignore the red.
+      modelError = controller.signal.aborted ? null : (error as Error).message;
+    }
+
+    const status = await currentModelStatus();
+    send(IPC.modelProgress, status);
+    return status;
   });
 
   ipcMain.handle(IPC.permissionsRequestSystemAudio, async () => {

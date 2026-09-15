@@ -7,11 +7,19 @@
     "dist/**/*",
     "package.json",
     "!**/*.map",
-    "!**/*.ts"
+    "!**/*.ts",
+
+    "!node_modules/better-sqlite3/deps/**",
+    "!node_modules/better-sqlite3/src/**",
+    "!node_modules/better-sqlite3/binding.gyp",
+    "!node_modules/better-sqlite3/prebuilds/linux-*.node",
+    "!node_modules/better-sqlite3/prebuilds/linuxmusl-*.node",
+    "!node_modules/better-sqlite3/prebuilds/win32-*.node",
+    "!node_modules/better-sqlite3/prebuilds/darwin-x64.node"
   ],
+  "electronLanguages": ["en"],
   "extraResources": [
-    { "from": "resources/bin", "to": "bin" },
-    { "from": "resources/models", "to": "models", "filter": ["**/*.bin"] }
+    { "from": "resources/bin", "to": "bin" }
   ],
   "asarUnpack": ["**/*.node"],
   "mac": {

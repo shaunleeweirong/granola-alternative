@@ -21,11 +21,11 @@ permissions:
   contents: write
 
 env:
-  # large-v3-turbo: near the accuracy of Whisper's largest model at a fraction
-  # of the cost, and comfortably faster than real time on Apple Silicon.
-  # Multilingual, which is fine because the language is always pinned (FR-14).
-  WHISPER_MODEL: ggml-large-v3-turbo.bin
-  WHISPER_MODEL_URL: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
+  # The speech model is NOT bundled. At 874 MB it dwarfed everything else in
+  # the installer, and welding it into the app meant every bug fix cost another
+  # full download of it. The app fetches it once on first launch instead; see
+  # src/core/models/catalog.ts and publish-model.yml.
+  #
   # There is no Apple Developer certificate in this repository, so stop
   # electron-builder hunting for one and failing. The app is ad-hoc signed
   # below instead, which is the minimum Apple Silicon will run at all.
@@ -39,27 +39,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Fetch the speech model
-        # Done first, and deliberately: a bad model name is the cheapest
-        # failure in this workflow and should not cost a 20-minute build.
-        run: |
-          set -euo pipefail
-          mkdir -p resources/models
-          if ! curl -fL --retry 3 "$WHISPER_MODEL_URL" -o "resources/models/$WHISPER_MODEL"; then
-            echo "::error::Could not download $WHISPER_MODEL from $WHISPER_MODEL_URL"
-            echo "::error::Check the file name against https://huggingface.co/ggerganov/whisper.cpp/tree/main"
-            exit 1
-          fi
-          # A 404 page saved under the right name would sail through the line
-          # above, so insist the file is plausibly a model.
-          size=$(stat -f%z "resources/models/$WHISPER_MODEL")
-          if [ "$size" -lt 10000000 ]; then
-            echo "::error::$WHISPER_MODEL is only $size bytes; that is not a model file"
-            head -c 400 "resources/models/$WHISPER_MODEL"
-            exit 1
-          fi
-          ls -lh "resources/models/$WHISPER_MODEL"
 
       - uses: actions/setup-node@v4
         with:
@@ -194,10 +173,17 @@ jobs:
 
           for required in \
             "Contents/Resources/bin/meeting-audio-tap" \
-            "Contents/Resources/bin/whisper-server" \
-            "Contents/Resources/models/$WHISPER_MODEL"; do
+            "Contents/Resources/bin/whisper-server"; do
             test -e "$app/$required" || { echo "::error::missing $required"; exit 1; }
           done
+
+          # The model must NOT be in here. Shipping one by accident would put
+          # the gigabyte straight back into every download.
+          if [ -d "$app/Contents/Resources/models" ]; then
+            echo "::error::a model was bundled into the app; it is meant to be downloaded on first launch"
+            ls -lh "$app/Contents/Resources/models"
+            exit 1
+          fi
 
           # The binary must run from where it will actually live, after
           # copying, signing and hardened-runtime entitlements.
@@ -230,6 +216,15 @@ jobs:
           shasum -a 256 "$final" | tee "$final.sha256.txt"
           echo "path=$final" >> "$GITHUB_OUTPUT"
           ls -lh "$final"
+
+          # Without the model this should be around 110 MB. If it creeps back
+          # towards a gigabyte, something is being bundled that should not be.
+          bytes=$(stat -f%z "$final")
+          mb=$((bytes / 1024 / 1024))
+          echo "### Installer: ${mb} MB" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$mb" -gt 400 ]; then
+            echo "::warning::the installer is ${mb} MB; it should be about 110 MB without a bundled model"
+          fi
 
       - name: Upload the .dmg
         uses: actions/upload-artifact@v4

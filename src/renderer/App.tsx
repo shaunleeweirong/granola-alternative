@@ -5,8 +5,10 @@ import { useRecorder } from "./useRecorder.ts";
 import { LevelMeter } from "./components/LevelMeter.tsx";
 import { TranscriptPanel } from "./components/TranscriptPanel.tsx";
 import { NoteList } from "./components/NoteList.tsx";
+import { ModelSetup } from "./components/ModelSetup.tsx";
 import { formatTimestamp } from "../core/transcript/merge.ts";
-import type { NoteDto, NoteSummaryDto, ServicesStatus } from "../shared/ipc.ts";
+import { progressFraction } from "../core/models/catalog.ts";
+import type { ModelStatus, NoteDto, NoteSummaryDto, ServicesStatus } from "../shared/ipc.ts";
 
 export function App(): JSX.Element {
   const [notes, setNotes] = useState<NoteSummaryDto[]>([]);
@@ -16,6 +18,8 @@ export function App(): JSX.Element {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
+  const [model, setModel] = useState<ModelStatus | null>(null);
+  const [setupDismissed, setSetupDismissed] = useState(false);
 
   const refreshNotes = useCallback(
     async (search = query) => {
@@ -63,6 +67,20 @@ export function App(): JSX.Element {
     return () => {
       cancelled = true;
       if (timer) window.clearTimeout(timer);
+    };
+  }, []);
+
+  // The model is fetched on first launch rather than shipped in the installer,
+  // so the app has to know whether it is there yet, and follow the download.
+  useEffect(() => {
+    let cancelled = false;
+    void window.api.getModelStatus().then((next) => {
+      if (!cancelled) setModel(next);
+    });
+    const unsubscribe = window.api.onModelProgress(setModel);
+    return () => {
+      cancelled = true;
+      unsubscribe();
     };
   }, []);
 
@@ -125,10 +143,27 @@ export function App(): JSX.Element {
     [selected, refreshNotes]
   );
 
+  // Shown in the banner when the setup screen has been dismissed but the
+  // download is still running, so it does not just say "downloading" forever.
+  const modelPercent = useMemo(() => {
+    if (!model?.downloading) return null;
+    const fraction = progressFraction(model.receivedBytes, model.totalBytes);
+    return fraction === null ? null : Math.round(fraction * 100);
+  }, [model]);
+
   const banner = useMemo(() => {
     if (state.error) return { tone: "error" as const, text: state.error };
     if (generateError) return { tone: "error" as const, text: generateError };
     if (state.warning) return { tone: "warn" as const, text: state.warning };
+    if (model && !model.installed) {
+      return {
+        tone: "warn" as const,
+        text: model.downloading
+          ? `Downloading the speech model${modelPercent === null ? "" : `, ${modelPercent}%`}. Recordings made now will be transcribed once it finishes.`
+          : "No speech model yet, so recordings will be saved but not transcribed.",
+        action: model.downloading ? null : { label: "Download", run: () => void window.api.downloadModel() },
+      };
+    }
     if (status && !status.transcriptionReady) {
       if (status.transcriptionStarting) {
         return {
@@ -150,7 +185,18 @@ export function App(): JSX.Element {
       };
     }
     return null;
-  }, [state.error, state.warning, generateError, status]);
+  }, [state.error, state.warning, generateError, status, model, modelPercent]);
+
+  if (model && !model.installed && !setupDismissed) {
+    return (
+      <ModelSetup
+        status={model}
+        onDownload={() => void window.api.downloadModel()}
+        onCancel={() => void window.api.cancelModelDownload()}
+        onSkip={() => setSetupDismissed(true)}
+      />
+    );
+  }
 
   return (
     <div className="app">
@@ -205,7 +251,16 @@ export function App(): JSX.Element {
           ) : null}
         </header>
 
-        {banner ? <div className={`banner ${banner.tone}`}>{banner.text}</div> : null}
+        {banner ? (
+          <div className={`banner ${banner.tone}`}>
+            <span>{banner.text}</span>
+            {"action" in banner && banner.action ? (
+              <button type="button" className="banner-action" onClick={banner.action.run}>
+                {banner.action.label}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         {selected || state.isRecording ? (
           <div className="panes">

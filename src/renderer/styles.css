@@ -87,7 +87,13 @@ button.record:disabled { opacity: 0.6; cursor: default; }
 .meter-fill { height: 100%; background: var(--accent); transition: width 90ms linear; }
 
 /* banner */
-.banner { padding: 9px 20px; font-size: 13px; border-bottom: 1px solid var(--line); }
+.banner { padding: 9px 20px; font-size: 13px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+.banner span { flex: 1; min-width: 0; }
+.banner-action {
+  background: rgba(255, 255, 255, 0.1); border: 1px solid currentColor; border-radius: 5px;
+  padding: 3px 10px; cursor: pointer; font-size: 12px; white-space: nowrap;
+}
+.banner-action:hover { background: rgba(255, 255, 255, 0.18); }
 .banner.warn { background: #2a2214; color: #f0c987; }
 .banner.error { background: #2c1817; color: #f0a79c; }
 
@@ -123,4 +129,41 @@ button.record:disabled { opacity: 0.6; cursor: default; }
 @media (max-width: 900px) {
   .app { grid-template-columns: 220px 1fr; }
   .panes { grid-template-columns: 1fr; }
+}
+
+/* first-run model download (FR-19) */
+.setup { height: 100vh; display: grid; place-items: center; padding: 24px; -webkit-app-region: drag; }
+.setup-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 28px 30px; max-width: 480px; -webkit-app-region: no-drag;
+}
+.setup-card h2 { margin: 0 0 12px; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.setup-card p { margin: 0 0 12px; line-height: 1.5; }
+.setup-detail { color: var(--muted); font-size: 13px; }
+.setup-footnote { color: var(--muted); font-size: 12px; margin: 14px 0 0; }
+.setup-error { color: var(--danger); font-size: 13px; }
+.setup-progress { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.setup-actions { display: flex; align-items: center; gap: 12px; margin-top: 18px; }
+.setup-actions button {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: 7px 14px; cursor: pointer;
+}
+.setup-actions .link { background: none; border: 0; color: var(--muted); padding: 7px 4px; }
+.setup-actions .link:hover { color: var(--text); }
+
+.progress {
+  height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden;
+  margin: 18px 0 8px;
+}
+.progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.2s linear; }
+.progress-fill.indeterminate { width: 35%; animation: slide 1.2s ease-in-out infinite; }
+
+@keyframes slide {
+  0% { margin-left: -35%; }
+  100% { margin-left: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-fill { transition: none; }
+  .progress-fill.indeterminate { animation: none; width: 100%; opacity: 0.4; }
 }

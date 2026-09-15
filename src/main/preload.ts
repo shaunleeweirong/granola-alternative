@@ -27,6 +27,9 @@ const api: RendererApi = {
   getDictionary: () => ipcRenderer.invoke(IPC.dictionaryGet),
   setDictionary: (terms) => ipcRenderer.invoke(IPC.dictionarySet, terms),
   getServicesStatus: () => ipcRenderer.invoke(IPC.servicesStatus),
+  getModelStatus: () => ipcRenderer.invoke(IPC.modelStatus),
+  downloadModel: () => ipcRenderer.invoke(IPC.modelDownload),
+  cancelModelDownload: () => ipcRenderer.invoke(IPC.modelCancel),
   requestSystemAudioAccess: () => ipcRenderer.invoke(IPC.permissionsRequestSystemAudio),
 
   onLevel: (handler) => subscribe(IPC.recordingLevel, handler),
@@ -34,6 +37,7 @@ const api: RendererApi = {
   onTranscriptError: (handler) => subscribe(IPC.transcriptError, handler),
   onGenerateChunk: (handler) => subscribe(IPC.notesGenerateChunk, handler),
   onSystemAudioSilent: (handler) => subscribe(IPC.audioSystemSilent, () => handler()),
+  onModelProgress: (handler) => subscribe(IPC.modelProgress, handler),
 };
 
 contextBridge.exposeInMainWorld("api", api);

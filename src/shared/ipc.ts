@@ -21,6 +21,10 @@ export const IPC = {
   dictionaryGet: "dictionary:get",
   dictionarySet: "dictionary:set",
   servicesStatus: "services:status",
+  modelStatus: "model:status",
+  modelDownload: "model:download",
+  modelCancel: "model:cancel",
+  modelProgress: "model:progress",
 } as const;
 
 export interface StartRecordingResult {
@@ -86,6 +90,28 @@ export interface ServicesStatus {
   transcriptionLog?: string[];
 }
 
+/**
+ * State of the one speech model the app needs.
+ *
+ * The model is fetched on first launch rather than shipped inside the
+ * installer, so the UI has to be able to say where that has got to.
+ */
+export interface ModelStatus {
+  /** A verified copy is on disk and transcription can run. */
+  installed: boolean;
+  displayName: string;
+  description: string;
+  /** Rough size, for "this will download about X" before a request is made. */
+  approxBytes: number;
+  downloading: boolean;
+  receivedBytes: number;
+  /** Null when the server did not say; the UI shows an indeterminate bar. */
+  totalBytes: number | null;
+  /** Bytes already on disk from an interrupted attempt, which will be resumed. */
+  resumableBytes: number;
+  error: string | null;
+}
+
 export interface GenerateChunkEvent {
   noteId: number;
   delta: string;
@@ -112,6 +138,9 @@ export interface RendererApi {
   getDictionary(): Promise<string[]>;
   setDictionary(terms: string[]): Promise<void>;
   getServicesStatus(): Promise<ServicesStatus>;
+  getModelStatus(): Promise<ModelStatus>;
+  downloadModel(): Promise<ModelStatus>;
+  cancelModelDownload(): Promise<void>;
   requestSystemAudioAccess(): Promise<{ granted: boolean }>;
 
   onLevel(handler: (event: LevelUpdate) => void): () => void;
@@ -119,4 +148,5 @@ export interface RendererApi {
   onTranscriptError(handler: (event: TranscriptErrorEvent) => void): () => void;
   onGenerateChunk(handler: (event: GenerateChunkEvent) => void): () => void;
   onSystemAudioSilent(handler: () => void): () => void;
+  onModelProgress(handler: (status: ModelStatus) => void): () => void;
 }

@@ -1,0 +1,89 @@
+name: Publish the speech model
+
+# Copies the speech model into this repository's own Releases, under a fixed
+# `models` tag, so the app has a stable URL to download from on first launch.
+#
+# Why not just point the app at Hugging Face? It rate limits, and it is blocked
+# on a good number of corporate networks. That is precisely where a meeting
+# recorder runs. Hugging Face stays as the app's fallback source; this is the
+# one it tries first.
+#
+# Run this once. It only needs running again if the model in
+# src/core/models/catalog.ts changes.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the model from the app's catalog
+        # Single source of truth: the file name and the fallback URL come from
+        # the same place the app reads them, so the two cannot drift apart.
+        id: model
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types -e '
+            import("./src/core/models/catalog.ts").then(({ WHISPER_MODEL }) => {
+              const upstream = WHISPER_MODEL.urls.find((u) => u.includes("huggingface.co"));
+              if (!upstream) throw new Error("no upstream source in the catalog");
+              process.stdout.write(`file=${WHISPER_MODEL.fileName}\nurl=${upstream}\nmin=${WHISPER_MODEL.minBytes}\n`);
+            });
+          ' >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+      - name: Fetch it
+        env:
+          FILE: ${{ steps.model.outputs.file }}
+          URL: ${{ steps.model.outputs.url }}
+          MIN: ${{ steps.model.outputs.min }}
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 --retry-delay 5 "$URL" -o "$FILE"
+
+          # A 404 page saved under the right name would pass a plain existence
+          # check, so apply the same two tests the app applies.
+          size=$(stat -c%s "$FILE")
+          if [ "$size" -lt "$MIN" ]; then
+            echo "::error::$FILE is only $size bytes, below the catalog's floor of $MIN"
+            head -c 400 "$FILE"
+            exit 1
+          fi
+          magic=$(head -c 4 "$FILE")
+          if [ "$magic" != "lmgg" ] && [ "$magic" != "GGUF" ]; then
+            echo "::error::$FILE does not start with a ggml header (got '$magic')"
+            exit 1
+          fi
+          ls -lh "$FILE"
+
+      - name: Publish it and print its checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FILE: ${{ steps.model.outputs.file }}
+        run: |
+          set -euo pipefail
+          sha=$(sha256sum "$FILE" | cut -d' ' -f1)
+          echo "$sha  $FILE" > "$FILE.sha256.txt"
+
+          gh release create models \
+            --title "Speech models" \
+            --notes "Speech models downloaded by Meeting Notes on first launch. Not an app release." \
+            || echo "the models release already exists"
+          gh release upload models "$FILE" "$FILE.sha256.txt" --clobber
+
+          {
+            echo "### Published \`$FILE\`"
+            echo
+            echo "SHA-256: \`$sha\`"
+            echo
+            echo "Pin this in \`src/core/models/catalog.ts\` as \`sha256\` so the app"
+            echo "rejects a damaged download rather than trying to run one."
+          } >> "$GITHUB_STEP_SUMMARY"
