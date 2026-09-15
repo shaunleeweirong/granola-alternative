@@ -116,6 +116,9 @@ function initServices(): void {
       "--threads", String(Math.max(2, Math.floor(availableParallelism() / 2))),
     ],
     healthCheck: () => whisper.isHealthy(),
+    // Without this the engine's own errors go nowhere, and a failure to launch
+    // can only ever surface as "fetch failed".
+    onLog: (line) => console.log(`[service] ${line}`),
   });
 
   llamaService = new LocalService({
@@ -128,6 +131,7 @@ function initServices(): void {
       "--ctx-size", "16384",
     ],
     healthCheck: () => llama.isHealthy(),
+    onLog: (line) => console.log(`[service] ${line}`),
   });
 
   controller = new RecordingController({
@@ -303,6 +307,9 @@ function registerIpc(): void {
       languageModelReady,
       systemAudioSupported: systemAudioSupported(),
       systemAudioGranted: existsSync(resourcePath("bin", "meeting-audio-tap")),
+      transcriptionReason: transcriptionReady ? null : whisperService?.reason ?? null,
+      transcriptionStarting: !transcriptionReady && whisperService?.status === "starting",
+      transcriptionLog: transcriptionReady ? [] : whisperService?.log ?? [],
     };
   });
 

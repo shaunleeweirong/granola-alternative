@@ -78,6 +78,12 @@ export interface ServicesStatus {
   languageModelReady: boolean;
   systemAudioSupported: boolean;
   systemAudioGranted: boolean;
+  /** Why transcription is unavailable, in words a user can act on. */
+  transcriptionReason?: string | null;
+  /** Whether the engine is still loading, so the UI can say "starting" not "broken". */
+  transcriptionStarting?: boolean;
+  /** Recent engine output, for a bug report. */
+  transcriptionLog?: string[];
 }
 
 export interface GenerateChunkEvent {

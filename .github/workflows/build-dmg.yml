@@ -103,8 +103,13 @@ jobs:
           if [ ! -d .cache/whisper.cpp/.git ]; then
             git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git .cache/whisper.cpp
           fi
+          # BUILD_SHARED_LIBS defaults to ON on macOS, which links the server
+          # against libwhisper and several libggml dylibs that live in the build
+          # tree. Copying only the binary into the app leaves those behind and
+          # it dies at launch. Static linking makes the binary self-contained.
           cmake -S .cache/whisper.cpp -B .cache/whisper.cpp/build \
-            -DCMAKE_BUILD_TYPE=Release -DWHISPER_BUILD_SERVER=ON
+            -DCMAKE_BUILD_TYPE=Release -DWHISPER_BUILD_SERVER=ON \
+            -DBUILD_SHARED_LIBS=OFF
           cmake --build .cache/whisper.cpp/build --config Release -j "$(sysctl -n hw.ncpu)"
 
           mkdir -p resources/bin
@@ -112,6 +117,26 @@ jobs:
           test -n "$server" || { echo "::error::no whisper-server binary produced"; exit 1; }
           cp "$server" resources/bin/whisper-server
           chmod +x resources/bin/whisper-server
+
+          # Prove it runs away from its build tree. Checking only that the file
+          # exists is what let a binary with unresolved dylibs ship: it was
+          # present, signed, and could not launch on a real machine.
+          probe=$(mktemp -d)
+          cp resources/bin/whisper-server "$probe/"
+          if ! "$probe/whisper-server" --help >"$probe/out.txt" 2>&1; then
+            if grep -qiE "library not loaded|image not found|dyld|symbol not found" "$probe/out.txt"; then
+              echo "::error::whisper-server cannot run outside its build tree (missing shared libraries)"
+              cat "$probe/out.txt"
+              otool -L resources/bin/whisper-server || true
+              exit 1
+            fi
+          fi
+          if otool -L resources/bin/whisper-server | grep -q "\.cache/"; then
+            echo "::error::whisper-server still references libraries in the build tree"
+            otool -L resources/bin/whisper-server
+            exit 1
+          fi
+          echo "whisper-server runs standalone."
 
       - name: Build the app bundle
         run: |
@@ -173,6 +198,18 @@ jobs:
             "Contents/Resources/models/$WHISPER_MODEL"; do
             test -e "$app/$required" || { echo "::error::missing $required"; exit 1; }
           done
+
+          # The binary must run from where it will actually live, after
+          # copying, signing and hardened-runtime entitlements.
+          bundled="$app/Contents/Resources/bin/whisper-server"
+          if ! "$bundled" --help >/tmp/bundled.txt 2>&1; then
+            if grep -qiE "library not loaded|image not found|dyld|symbol not found|killed" /tmp/bundled.txt; then
+              echo "::error::the bundled whisper-server cannot launch"
+              cat /tmp/bundled.txt
+              exit 1
+            fi
+          fi
+          echo "Bundled speech engine launches."
 
           plist="$app/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c "Print :NSMicrophoneUsageDescription" "$plist" >/dev/null

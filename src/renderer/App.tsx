@@ -43,8 +43,28 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     void refreshNotes();
-    void window.api.getServicesStatus().then(setStatus);
   }, [refreshNotes]);
+
+  // The speech engine loads a multi-gigabyte model, so it is not ready the
+  // instant the window opens. Checking once on mount left the warning up even
+  // after a successful start. Poll until it is ready, then stop.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const check = async (): Promise<void> => {
+      const next = await window.api.getServicesStatus();
+      if (cancelled) return;
+      setStatus(next);
+      if (!next.transcriptionReady) timer = window.setTimeout(() => void check(), 3000);
+    };
+
+    void check();
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, []);
 
   // Streamed note generation appends into the editor as it arrives (FR-26).
   useEffect(() => {
@@ -110,9 +130,17 @@ export function App(): JSX.Element {
     if (generateError) return { tone: "error" as const, text: generateError };
     if (state.warning) return { tone: "warn" as const, text: state.warning };
     if (status && !status.transcriptionReady) {
+      if (status.transcriptionStarting) {
+        return {
+          tone: "warn" as const,
+          text: "Starting the speech engine. The first launch takes a minute while the model loads; you can record now and it will catch up.",
+        };
+      }
       return {
-        tone: "warn" as const,
-        text: "No transcription model is running. Recordings will be saved but not transcribed until one is installed.",
+        tone: "error" as const,
+        text: status.transcriptionReason
+          ? `Transcription is unavailable. ${status.transcriptionReason}`
+          : "Transcription is unavailable. Recordings will be saved but not transcribed.",
       };
     }
     if (status && !status.systemAudioSupported) {
