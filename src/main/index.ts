@@ -14,7 +14,7 @@ import { LocalService } from "./localService.ts";
 import { buildNoteMessages, chunkTranscript, hasNoteMaterial } from "../core/notes/notePrompt.ts";
 import { exportNoteToMarkdown, suggestFilename } from "../core/notes/exportMarkdown.ts";
 import { resolveModelPath } from "../core/modelPaths.ts";
-import { WHISPER_MODEL } from "../core/models/catalog.ts";
+import { MODELS, WHISPER_MODEL, LANGUAGE_MODEL, type ModelKind } from "../core/models/catalog.ts";
 import {
   downloadModel,
   isModelInstalled,
@@ -54,9 +54,9 @@ let llama: LlamaClient;
 let whisperService: LocalService;
 let llamaService: LocalService;
 
-/** Set only while a model download is in flight. */
-let modelDownload: { controller: AbortController; progress: DownloadProgress } | null = null;
-let modelError: string | null = null;
+/** In-flight downloads and last failures, keyed by which model they concern. */
+const modelDownloads = new Map<ModelKind, { controller: AbortController; progress: DownloadProgress }>();
+const modelErrors = new Map<ModelKind, string>();
 let userModelDir = "";
 
 const send = (channel: string, payload: unknown): void => {
@@ -121,22 +121,45 @@ function createWhisperService(modelPath: string | null): LocalService {
   });
 }
 
-async function currentModelStatus(): Promise<ModelStatus> {
-  const installed = await isModelInstalled(userModelDir, WHISPER_MODEL);
+/**
+ * The note-writing engine. Optional: transcription is the product, and the app
+ * is fully useful without ever downloading a language model.
+ */
+function createLlamaService(modelPath: string | null): LocalService {
+  return new LocalService({
+    name: "llama",
+    binaryPath: modelPath ? resourcePath("bin", "llama-server") : null,
+    args: [
+      "--host", "127.0.0.1",
+      "--port", String(LLAMA_PORT),
+      "--model", modelPath ?? "",
+      "--ctx-size", "16384",
+    ],
+    healthCheck: () => llama.isHealthy(),
+    onLog: (line) => console.log(`[service] ${line}`),
+  });
+}
+
+async function currentModelStatus(kind: ModelKind): Promise<ModelStatus> {
+  const spec = MODELS[kind];
+  const download = modelDownloads.get(kind);
+  const installed = await isModelInstalled(userModelDir, spec);
   return {
+    kind,
     installed,
-    displayName: WHISPER_MODEL.displayName,
-    description: WHISPER_MODEL.description,
-    approxBytes: WHISPER_MODEL.approxBytes,
-    downloading: modelDownload !== null,
-    receivedBytes: modelDownload?.progress.receivedBytes ?? 0,
-    totalBytes: modelDownload?.progress.totalBytes ?? null,
-    resumableBytes: installed ? 0 : await partialBytes(userModelDir, WHISPER_MODEL),
-    error: modelError,
+    displayName: spec.displayName,
+    description: spec.description,
+    approxBytes: spec.approxBytes,
+    downloading: download !== undefined,
+    receivedBytes: download?.progress.receivedBytes ?? 0,
+    totalBytes: download?.progress.totalBytes ?? null,
+    resumableBytes: installed ? 0 : await partialBytes(userModelDir, spec),
+    error: modelErrors.get(kind) ?? null,
   };
 }
 
-const pushModelStatus = async (): Promise<void> => send(IPC.modelProgress, await currentModelStatus());
+const pushModelStatus = async (kind: ModelKind): Promise<void> =>
+  send(IPC.modelProgress, await currentModelStatus(kind));
 
 function initServices(): void {
   const dbPath = path.join(app.getPath("userData"), "notes.db");
@@ -155,23 +178,10 @@ function initServices(): void {
       ?.path ?? null;
 
   const whisperModelPath = findModel(repo.getSetting("whisperModel") ?? WHISPER_MODEL.fileName);
-  const llamaModelName = repo.getSetting("llamaModel") ?? "";
-  const llamaModelPath = llamaModelName ? findModel(llamaModelName) : null;
+  const llamaModelPath = findModel(repo.getSetting("llamaModel") ?? LANGUAGE_MODEL.fileName);
 
   whisperService = createWhisperService(whisperModelPath);
-
-  llamaService = new LocalService({
-    name: "llama",
-    binaryPath: llamaModelPath ? resourcePath("bin", "llama-server") : null,
-    args: [
-      "--host", "127.0.0.1",
-      "--port", String(LLAMA_PORT),
-      "--model", llamaModelPath ?? "",
-      "--ctx-size", "16384",
-    ],
-    healthCheck: () => llama.isHealthy(),
-    onLog: (line) => console.log(`[service] ${line}`),
-  });
+  llamaService = createLlamaService(llamaModelPath);
 
   controller = new RecordingController({
     repo,
@@ -277,8 +287,13 @@ function registerIpc(): void {
       throw new Error("There is no transcript or notes to summarise yet.");
     }
     if (!(await llama.isHealthy())) {
+      // Deliberately specific: the old wording sent people to a Settings screen
+      // that has never existed, which is a dead end rather than an error.
+      const installed = await isModelInstalled(userModelDir, LANGUAGE_MODEL);
       throw new Error(
-        "No local language model is running. Add a model in Settings to generate notes."
+        installed
+          ? `The note writer is still starting up. ${llamaService?.reason ?? "Give it a moment and try again."}`
+          : "NO_LANGUAGE_MODEL"
       );
     }
 
@@ -357,50 +372,62 @@ function registerIpc(): void {
     };
   });
 
-  ipcMain.handle(IPC.modelStatus, async (): Promise<ModelStatus> => currentModelStatus());
+  ipcMain.handle(IPC.modelStatus, async (_event, kind: ModelKind): Promise<ModelStatus> =>
+    currentModelStatus(kind)
+  );
 
-  ipcMain.handle(IPC.modelCancel, async () => {
-    modelDownload?.controller.abort();
+  ipcMain.handle(IPC.modelCancel, async (_event, kind: ModelKind) => {
+    modelDownloads.get(kind)?.controller.abort();
   });
 
-  ipcMain.handle(IPC.modelDownload, async (): Promise<ModelStatus> => {
+  ipcMain.handle(IPC.modelDownload, async (_event, kind: ModelKind): Promise<ModelStatus> => {
+    const spec = MODELS[kind];
+
     // Two windows, or an impatient double-click, must not start two transfers
     // into the same file.
-    if (modelDownload) return currentModelStatus();
-    if (await isModelInstalled(userModelDir, WHISPER_MODEL)) return currentModelStatus();
+    if (modelDownloads.has(kind)) return currentModelStatus(kind);
+    if (await isModelInstalled(userModelDir, spec)) return currentModelStatus(kind);
 
     const controller = new AbortController();
-    modelDownload = { controller, progress: { receivedBytes: 0, totalBytes: null } };
-    modelError = null;
-    void pushModelStatus();
+    modelDownloads.set(kind, { controller, progress: { receivedBytes: 0, totalBytes: null } });
+    modelErrors.delete(kind);
+    void pushModelStatus(kind);
 
     try {
       const modelPath = await downloadModel({
-        spec: WHISPER_MODEL,
+        spec,
         destDir: userModelDir,
         signal: controller.signal,
         onProgress: (progress) => {
-          if (modelDownload) modelDownload.progress = progress;
-          void pushModelStatus();
+          const entry = modelDownloads.get(kind);
+          if (entry) entry.progress = progress;
+          void pushModelStatus(kind);
         },
       });
 
-      repo.setSetting("whisperModel", WHISPER_MODEL.fileName);
-      modelDownload = null;
+      modelDownloads.delete(kind);
 
-      // Start transcribing now rather than after a restart: this is the first
-      // thing a new user does, and "quit and reopen" is a poor welcome.
-      await whisperService.stop();
-      whisperService = createWhisperService(modelPath);
-      void whisperService.start();
+      // Start the engine now rather than after a restart: being told to quit
+      // and reopen the app is a poor reward for waiting out a download.
+      if (kind === "speech") {
+        repo.setSetting("whisperModel", spec.fileName);
+        await whisperService.stop();
+        whisperService = createWhisperService(modelPath);
+        void whisperService.start();
+      } else {
+        repo.setSetting("llamaModel", spec.fileName);
+        await llamaService.stop();
+        llamaService = createLlamaService(modelPath);
+        void llamaService.start();
+      }
     } catch (error) {
-      modelDownload = null;
+      modelDownloads.delete(kind);
       // Cancelling is a choice, not a fault. Reporting it in red alongside
       // genuine failures teaches people to ignore the red.
-      modelError = controller.signal.aborted ? null : (error as Error).message;
+      if (!controller.signal.aborted) modelErrors.set(kind, (error as Error).message);
     }
 
-    const status = await currentModelStatus();
+    const status = await currentModelStatus(kind);
     send(IPC.modelProgress, status);
     return status;
   });

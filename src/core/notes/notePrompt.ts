@@ -35,7 +35,7 @@ Descriptive topic subheadings named after the actual client, project, or initiat
 Only decisions that were explicitly made or clearly agreed.
 
 ## Action Items
-Only actions someone committed to or was asked to do; never turn a discussion topic into an action item. One checkbox per item in the form \`- [ ] Action — Owner\`. Put a stated due date inside the action text. When the transcript shows no owner, end the line after the action; never write a placeholder.
+Only actions someone committed to or was asked to do; never turn a discussion topic into an action item. One checkbox per item in the form \`- [ ] Action (Owner)\`. Put a stated due date inside the action text. When the transcript shows no owner, end the line after the action; never write a placeholder.
 
 ## Open Questions
 Unresolved questions, dependencies, and requested follow-ups.

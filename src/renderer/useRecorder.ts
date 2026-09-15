@@ -137,7 +137,7 @@ export function useRecorder(onFinished?: (noteId: number) => void) {
       noteId: started.noteId,
       warning: started.systemAudioReady
         ? null
-        : "Recording the microphone only — system audio is unavailable, so the other participants will not be transcribed.",
+        : "Recording the microphone only. System audio is unavailable, so the other participants will not be transcribed.",
     }));
 
     return started;

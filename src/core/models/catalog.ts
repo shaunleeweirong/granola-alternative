@@ -10,7 +10,11 @@
  * Pure: no filesystem, no network, no Electron, so the rules are testable.
  */
 
+/** Which engine a model feeds. */
+export type ModelKind = "speech" | "language";
+
 export interface ModelSpec {
+  kind: ModelKind;
   /** Stable identifier, used in settings and logs. */
   id: string;
   /** File name on disk. Also the name whisper.cpp is pointed at. */
@@ -52,6 +56,7 @@ export interface ModelSpec {
  * quality cost small enough not to be worth the gigabyte.
  */
 export const WHISPER_MODEL: ModelSpec = Object.freeze({
+  kind: "speech",
   id: "large-v3-turbo-q8_0",
   fileName: "ggml-large-v3-turbo-q8_0.bin",
   displayName: "Whisper large-v3-turbo",
@@ -63,6 +68,37 @@ export const WHISPER_MODEL: ModelSpec = Object.freeze({
     "https://github.com/shaunleeweirong/granola-alternative/releases/download/models/ggml-large-v3-turbo-q8_0.bin",
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin",
   ],
+});
+
+/**
+ * The model that writes the notes, run by llama.cpp.
+ *
+ * Optional and downloaded on demand: transcription is the product, and a
+ * two-gigabyte model has no business in the path of someone who only wants a
+ * transcript. 3B at 4-bit is about the floor for following a structured
+ * summarisation prompt; smaller models drift off the requested format.
+ *
+ * Swapping it is one edit here plus a run of publish-model.yml.
+ */
+export const LANGUAGE_MODEL: ModelSpec = Object.freeze({
+  kind: "language",
+  id: "llama-3.2-3b-instruct-q4_k_m",
+  fileName: "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+  displayName: "Llama 3.2 3B Instruct",
+  description: "Writes the summary, action items and decisions from a transcript.",
+  approxBytes: 2_020_000_000,
+  minBytes: 1_200_000_000,
+  sha256: null,
+  urls: [
+    "https://github.com/shaunleeweirong/granola-alternative/releases/download/models/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+    "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+  ],
+});
+
+/** Every model the app knows how to fetch, by kind. */
+export const MODELS: Record<ModelKind, ModelSpec> = Object.freeze({
+  speech: WHISPER_MODEL,
+  language: LANGUAGE_MODEL,
 });
 
 /**

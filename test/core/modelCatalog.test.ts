@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   WHISPER_MODEL,
+  LANGUAGE_MODEL,
+  MODELS,
   looksLikeModel,
   formatBytes,
   progressFraction,
@@ -64,4 +66,32 @@ test("progress is clamped, so a mis-stated total cannot exceed the bar", () => {
   assert.equal(progressFraction(50, 200), 0.25);
   assert.equal(progressFraction(300, 200), 1);
   assert.equal(progressFraction(-5, 200), 0);
+});
+
+test("every catalogued model is coherent and self-consistent", () => {
+  for (const [kind, model] of Object.entries(MODELS)) {
+    assert.equal(model.kind, kind, `${kind} entry must declare its own kind`);
+    assert.ok(model.urls.length >= 1, `${kind} needs at least one source`);
+    for (const url of model.urls) {
+      assert.ok(url.startsWith("https://"), `${url} must be https`);
+      assert.ok(url.endsWith(model.fileName), `${url} must serve ${model.fileName}`);
+    }
+    assert.ok(model.minBytes < model.approxBytes, `${kind} floor must sit below its real size`);
+    assert.ok(model.minBytes > 1_000_000, `${kind} floor must be far above an error page`);
+    assert.ok(model.displayName.length > 0 && model.description.length > 0);
+  }
+});
+
+test("the two models are distinct files", () => {
+  // They land in the same directory, so a shared name would have one overwrite
+  // the other and the app would run a summariser as a speech engine.
+  assert.notEqual(WHISPER_MODEL.fileName, LANGUAGE_MODEL.fileName);
+  assert.notEqual(WHISPER_MODEL.id, LANGUAGE_MODEL.id);
+});
+
+test("the language model is a GGUF and the speech model is a GGML", () => {
+  // llama.cpp and whisper.cpp read different container formats; swapping them
+  // produces a confusing load failure rather than an obvious one.
+  assert.match(LANGUAGE_MODEL.fileName, /\.gguf$/);
+  assert.match(WHISPER_MODEL.fileName, /\.bin$/);
 });

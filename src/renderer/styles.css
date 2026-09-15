@@ -167,3 +167,13 @@ button.record:disabled { opacity: 0.6; cursor: default; }
   .progress-fill { transition: none; }
   .progress-fill.indeterminate { animation: none; width: 100%; opacity: 0.4; }
 }
+
+/* offering the note-writing model where its absence is felt */
+.lm-prompt {
+  background: var(--panel-2); border: 1px solid var(--line); border-left: 2px solid var(--accent);
+  border-radius: 8px; padding: 16px 18px;
+}
+.lm-prompt h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+.lm-prompt p { margin: 0 0 10px; line-height: 1.5; }
+.lm-prompt .setup-actions { margin-top: 14px; }
+.lm-prompt .progress { margin: 14px 0 8px; }

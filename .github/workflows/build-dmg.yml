@@ -117,6 +117,63 @@ jobs:
           fi
           echo "whisper-server runs standalone."
 
+      - name: Cache the language engine build
+        id: llama-cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/llama.cpp
+          key: llama-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Build the language engine
+        run: |
+          set -euo pipefail
+          mkdir -p .cache
+
+          # Same guard as whisper.cpp: a restored cache can leave the directory
+          # present but without a repository in it, and git refuses to clone
+          # into a non-empty directory.
+          if [ -d .cache/llama.cpp ] && [ ! -d .cache/llama.cpp/.git ]; then
+            echo "llama.cpp directory exists without a repository; starting fresh"
+            rm -rf .cache/llama.cpp
+          fi
+
+          if [ ! -d .cache/llama.cpp/.git ]; then
+            git clone --depth 1 https://github.com/ggml-org/llama.cpp.git .cache/llama.cpp
+          fi
+
+          # Static, for the same reason whisper-server is: shared libraries left
+          # behind in the build tree produced an app that was signed, present,
+          # and could not launch.
+          cmake -S .cache/llama.cpp -B .cache/llama.cpp/build \
+            -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_SERVER=ON \
+            -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DBUILD_SHARED_LIBS=OFF
+          cmake --build .cache/llama.cpp/build --config Release -j "$(sysctl -n hw.ncpu)"
+
+          mkdir -p resources/bin
+          server=$(find .cache/llama.cpp/build -name llama-server -type f -perm -u+x | head -1)
+          test -n "$server" || { echo "::error::no llama-server binary produced"; exit 1; }
+          cp "$server" resources/bin/llama-server
+          chmod +x resources/bin/llama-server
+
+          # Prove it runs away from its build tree, exactly as for whisper-server.
+          probe=$(mktemp -d)
+          cp resources/bin/llama-server "$probe/"
+          if ! "$probe/llama-server" --help >"$probe/out.txt" 2>&1; then
+            if grep -qiE "library not loaded|image not found|dyld|symbol not found" "$probe/out.txt"; then
+              echo "::error::llama-server cannot run outside its build tree (missing shared libraries)"
+              cat "$probe/out.txt"
+              otool -L resources/bin/llama-server || true
+              exit 1
+            fi
+          fi
+          if otool -L resources/bin/llama-server | grep -q "\.cache/"; then
+            echo "::error::llama-server still references libraries in the build tree"
+            otool -L resources/bin/llama-server
+            exit 1
+          fi
+          echo "llama-server runs standalone."
+
       - name: Build the app bundle
         run: |
           set -euo pipefail
@@ -173,7 +230,8 @@ jobs:
 
           for required in \
             "Contents/Resources/bin/meeting-audio-tap" \
-            "Contents/Resources/bin/whisper-server"; do
+            "Contents/Resources/bin/whisper-server" \
+            "Contents/Resources/bin/llama-server"; do
             test -e "$app/$required" || { echo "::error::missing $required"; exit 1; }
           done
 
@@ -187,15 +245,17 @@ jobs:
 
           # The binary must run from where it will actually live, after
           # copying, signing and hardened-runtime entitlements.
-          bundled="$app/Contents/Resources/bin/whisper-server"
-          if ! "$bundled" --help >/tmp/bundled.txt 2>&1; then
-            if grep -qiE "library not loaded|image not found|dyld|symbol not found|killed" /tmp/bundled.txt; then
-              echo "::error::the bundled whisper-server cannot launch"
-              cat /tmp/bundled.txt
-              exit 1
+          for engine in whisper-server llama-server; do
+            bundled="$app/Contents/Resources/bin/$engine"
+            if ! "$bundled" --help >/tmp/bundled.txt 2>&1; then
+              if grep -qiE "library not loaded|image not found|dyld|symbol not found|killed" /tmp/bundled.txt; then
+                echo "::error::the bundled $engine cannot launch"
+                cat /tmp/bundled.txt
+                exit 1
+              fi
             fi
-          fi
-          echo "Bundled speech engine launches."
+          done
+          echo "Both bundled engines launch."
 
           plist="$app/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c "Print :NSMicrophoneUsageDescription" "$plist" >/dev/null

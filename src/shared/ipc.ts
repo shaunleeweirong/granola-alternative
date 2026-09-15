@@ -1,4 +1,5 @@
 import type { Channel, TranscriptSegment } from "../core/transcript/types.ts";
+import type { ModelKind } from "../core/models/catalog.ts";
 
 /** Channel names for renderer <-> main. Kept in one place so both sides agree. */
 export const IPC = {
@@ -118,7 +119,8 @@ export interface ServicesStatus {
  * installer, so the UI has to be able to say where that has got to.
  */
 export interface ModelStatus {
-  /** A verified copy is on disk and transcription can run. */
+  kind: ModelKind;
+  /** A verified copy is on disk and the engine that needs it can run. */
   installed: boolean;
   displayName: string;
   description: string;
@@ -159,9 +161,9 @@ export interface RendererApi {
   getDictionary(): Promise<string[]>;
   setDictionary(terms: string[]): Promise<void>;
   getServicesStatus(): Promise<ServicesStatus>;
-  getModelStatus(): Promise<ModelStatus>;
-  downloadModel(): Promise<ModelStatus>;
-  cancelModelDownload(): Promise<void>;
+  getModelStatus(kind: ModelKind): Promise<ModelStatus>;
+  downloadModel(kind: ModelKind): Promise<ModelStatus>;
+  cancelModelDownload(kind: ModelKind): Promise<void>;
   requestSystemAudioAccess(): Promise<{ granted: boolean }>;
 
   onLevel(handler: (event: LevelUpdate) => void): () => void;

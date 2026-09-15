@@ -79,7 +79,7 @@ You can press **Not now** and use the app without it. Meetings will still record
 | Not included | Why |
 | --- | --- |
 | Speech model | `ggml-large-v3-turbo-q8_0.bin`, about 834 MB, downloaded on first launch. 8-bit quantisation of the same model Whisper calls large-v3-turbo: near the accuracy of Whisper's largest model, comfortably faster than real time on Apple Silicon. |
-| Note-writing model | A useful one is several gigabytes. Transcription works fully without it; the "Generate notes" button explains what to add. |
+| Note-writing model | `Llama-3.2-3B-Instruct-Q4_K_M.gguf`, about 1.9 GB, downloaded only if you press **Generate notes**. Transcription is the product and works fully without it, so it is never fetched unless you ask for a summary. |
 | A different speech model | Drop any `ggml-*.bin` into `~/Library/Application Support/Meeting Notes/models/` and it takes precedence, with no new build needed. Use this to trade accuracy for speed or download size. |
 
 ## Building a new .dmg

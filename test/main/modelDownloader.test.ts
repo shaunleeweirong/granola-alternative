@@ -26,6 +26,7 @@ const sha256 = (b: Buffer): string => createHash("sha256").update(b).digest("hex
 
 function specFor(urls: string[], overrides: Partial<ModelSpec> = {}): ModelSpec {
   return {
+    kind: "speech",
     id: "test-model",
     fileName: "test-model.bin",
     displayName: "Test model",

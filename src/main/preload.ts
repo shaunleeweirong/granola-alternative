@@ -27,9 +27,9 @@ const api: RendererApi = {
   getDictionary: () => ipcRenderer.invoke(IPC.dictionaryGet),
   setDictionary: (terms) => ipcRenderer.invoke(IPC.dictionarySet, terms),
   getServicesStatus: () => ipcRenderer.invoke(IPC.servicesStatus),
-  getModelStatus: () => ipcRenderer.invoke(IPC.modelStatus),
-  downloadModel: () => ipcRenderer.invoke(IPC.modelDownload),
-  cancelModelDownload: () => ipcRenderer.invoke(IPC.modelCancel),
+  getModelStatus: (kind) => ipcRenderer.invoke(IPC.modelStatus, kind),
+  downloadModel: (kind) => ipcRenderer.invoke(IPC.modelDownload, kind),
+  cancelModelDownload: (kind) => ipcRenderer.invoke(IPC.modelCancel, kind),
   requestSystemAudioAccess: () => ipcRenderer.invoke(IPC.permissionsRequestSystemAudio),
 
   onLevel: (handler) => subscribe(IPC.recordingLevel, handler),

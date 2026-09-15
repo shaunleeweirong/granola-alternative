@@ -1,11 +1,12 @@
 import type { JSX } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useRecorder } from "./useRecorder.ts";
 import { LevelMeter } from "./components/LevelMeter.tsx";
 import { TranscriptPanel } from "./components/TranscriptPanel.tsx";
 import { NoteList } from "./components/NoteList.tsx";
 import { ModelSetup } from "./components/ModelSetup.tsx";
+import { LanguageModelPrompt } from "./components/LanguageModelPrompt.tsx";
 import { formatTimestamp } from "../core/transcript/merge.ts";
 import { progressFraction } from "../core/models/catalog.ts";
 import type { ModelStatus, NoteDto, NoteSummaryDto, ServicesStatus } from "../shared/ipc.ts";
@@ -19,7 +20,9 @@ export function App(): JSX.Element {
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [model, setModel] = useState<ModelStatus | null>(null);
+  const [languageModel, setLanguageModel] = useState<ModelStatus | null>(null);
   const [setupDismissed, setSetupDismissed] = useState(false);
+  const [offeringLanguageModel, setOfferingLanguageModel] = useState(false);
 
   const refreshNotes = useCallback(
     async (search = query) => {
@@ -74,15 +77,39 @@ export function App(): JSX.Element {
   // so the app has to know whether it is there yet, and follow the download.
   useEffect(() => {
     let cancelled = false;
-    void window.api.getModelStatus().then((next) => {
-      if (!cancelled) setModel(next);
+    const apply = (next: ModelStatus): void => {
+      if (next.kind === "language") setLanguageModel(next);
+      else setModel(next);
+    };
+
+    void window.api.getModelStatus("speech").then((next) => {
+      if (!cancelled) apply(next);
     });
-    const unsubscribe = window.api.onModelProgress(setModel);
+    void window.api.getModelStatus("language").then((next) => {
+      if (!cancelled) apply(next);
+    });
+
+    const unsubscribe = window.api.onModelProgress(apply);
     return () => {
       cancelled = true;
       unsubscribe();
     };
   }, []);
+
+  // The note is created the moment recording starts, but nothing selected it, so
+  // the meeting ran with a placeholder where the editor should have been and
+  // there was no way to take notes during the call the app exists to record.
+  const autoOpenedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!state.isRecording || state.noteId === null) return;
+    if (selected?.id === state.noteId) return;
+    // Once per recording. Retrying on every change of `selected` would spin
+    // forever if the note went away: deleting it from the sidebar mid-meeting
+    // clears the selection, which would immediately ask for it again.
+    if (autoOpenedRef.current === state.noteId) return;
+    autoOpenedRef.current = state.noteId;
+    void openNote(state.noteId);
+  }, [state.isRecording, state.noteId, selected?.id, openNote]);
 
   // Streamed note generation appends into the editor as it arrives (FR-26).
   useEffect(() => {
@@ -103,6 +130,10 @@ export function App(): JSX.Element {
     });
   }, [openNote]);
 
+  useEffect(() => {
+    if (languageModel?.installed) setOfferingLanguageModel(false);
+  }, [languageModel?.installed]);
+
   const liveSegments = state.isRecording ? state.segments : (selected?.segments ?? []);
 
   const saveManualNotes = useCallback(
@@ -122,6 +153,11 @@ export function App(): JSX.Element {
 
   const generate = useCallback(async () => {
     if (!selected) return;
+    // Asking for something the app can fetch is not an error state; offer it.
+    if (languageModel && !languageModel.installed) {
+      setOfferingLanguageModel(true);
+      return;
+    }
     setGenerating(true);
     setGenerateError(null);
     setSelected({ ...selected, generatedNotes: "" });
@@ -129,9 +165,14 @@ export function App(): JSX.Element {
       await window.api.generateNotes({ noteId: selected.id });
     } catch (error) {
       setGenerating(false);
-      setGenerateError((error as Error).message);
+      const message = (error as Error).message;
+      if (message.includes("NO_LANGUAGE_MODEL")) {
+        setOfferingLanguageModel(true);
+        return;
+      }
+      setGenerateError(message);
     }
-  }, [selected]);
+  }, [selected, languageModel]);
 
   const removeNote = useCallback(
     async (noteId: number) => {
@@ -176,7 +217,7 @@ export function App(): JSX.Element {
         text: model.downloading
           ? `Downloading the speech model${modelPercent === null ? "" : `, ${modelPercent}%`}. Recordings made now will be transcribed once it finishes.`
           : "No speech model yet, so recordings will be saved but not transcribed.",
-        action: model.downloading ? null : { label: "Download", run: () => void window.api.downloadModel() },
+        action: model.downloading ? null : { label: "Download", run: () => void window.api.downloadModel("speech") },
       };
     }
     if (status && !status.transcriptionReady) {
@@ -206,8 +247,8 @@ export function App(): JSX.Element {
     return (
       <ModelSetup
         status={model}
-        onDownload={() => void window.api.downloadModel()}
-        onCancel={() => void window.api.cancelModelDownload()}
+        onDownload={() => void window.api.downloadModel("speech")}
+        onCancel={() => void window.api.cancelModelDownload("speech")}
         onSkip={() => setSetupDismissed(true)}
       />
     );
@@ -290,6 +331,14 @@ export function App(): JSX.Element {
                     onChange={(event) => setTitle(event.target.value)}
                     onBlur={() => void saveTitle()}
                   />
+                  {offeringLanguageModel && languageModel ? (
+                    <LanguageModelPrompt
+                      status={languageModel}
+                      onDownload={() => void window.api.downloadModel("language")}
+                      onCancel={() => void window.api.cancelModelDownload("language")}
+                      onDismiss={() => setOfferingLanguageModel(false)}
+                    />
+                  ) : null}
                   {selected.generatedNotes ? (
                     <article className="generated">{selected.generatedNotes}</article>
                   ) : null}
@@ -299,7 +348,7 @@ export function App(): JSX.Element {
                   <textarea
                     id="manual-notes"
                     value={selected.manualNotes}
-                    placeholder="Type while the meeting runs — these are passed to the summariser."
+                    placeholder="Type while the meeting runs. These are passed to the summariser."
                     onChange={(event) => void saveManualNotes(event.target.value)}
                   />
                 </>
