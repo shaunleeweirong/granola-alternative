@@ -1,7 +1,4 @@
 import type { JSX } from "react";
-
-/** Injected by Vite at build time; see vite.config.mts. */
-declare const __BUILD_ID__: string;
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useRecorder } from "./useRecorder.ts";
@@ -13,8 +10,11 @@ import { LanguageModelPrompt } from "./components/LanguageModelPrompt.tsx";
 import { NoteStylePicker } from "./components/NoteStylePicker.tsx";
 import { formatTimestamp } from "../core/transcript/merge.ts";
 import { progressFraction } from "../core/models/catalog.ts";
-import type { ModelStatus, NoteDto, NoteSummaryDto, ServicesStatus } from "../shared/ipc.ts";
+import { unknownModelStatus, type ModelStatus, type NoteDto, type NoteSummaryDto, type ServicesStatus } from "../shared/ipc.ts";
 import { DEFAULT_NOTE_PREFERENCES, resolveStyle, type NotePreferences } from "../core/notes/noteStyles.ts";
+
+/** Injected by Vite at build time; see vite.config.mts. */
+declare const __BUILD_ID__: string;
 
 export function App(): JSX.Element {
   const [notes, setNotes] = useState<NoteSummaryDto[]>([]);
@@ -178,6 +178,7 @@ export function App(): JSX.Element {
     // Asking for something the app can fetch is not an error state; offer it.
     if (languageModel && !languageModel.installed) {
       setOfferingLanguageModel(true);
+      void window.api.getModelStatus("language").then(setLanguageModel);
       return;
     }
     setGenerating(true);
@@ -190,6 +191,9 @@ export function App(): JSX.Element {
       const message = (error as Error).message;
       if (message.includes("NO_LANGUAGE_MODEL")) {
         setOfferingLanguageModel(true);
+        // The status may never have arrived, which is exactly when the offer
+        // used to render nothing at all. Ask again, and show it regardless.
+        void window.api.getModelStatus("language").then(setLanguageModel);
         return;
       }
       setGenerateError(message);
@@ -371,9 +375,9 @@ export function App(): JSX.Element {
                       onClose={() => setPickingStyle(false)}
                     />
                   ) : null}
-                  {offeringLanguageModel && languageModel ? (
+                  {offeringLanguageModel ? (
                     <LanguageModelPrompt
-                      status={languageModel}
+                      status={languageModel ?? unknownModelStatus("language")}
                       onDownload={() => void window.api.downloadModel("language")}
                       onCancel={() => void window.api.cancelModelDownload("language")}
                       onDismiss={() => setOfferingLanguageModel(false)}

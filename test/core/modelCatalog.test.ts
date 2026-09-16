@@ -110,3 +110,21 @@ test("the two models do not share a checksum", () => {
   // unverifiable, and the failure would look like a corrupt download forever.
   assert.notEqual(WHISPER_MODEL.sha256, LANGUAGE_MODEL.sha256);
 });
+
+test("a model with no status yet is still describable", async () => {
+  // The download offer used to be gated on the real status having arrived from
+  // the main process. Before it did, pressing Generate notes rendered nothing
+  // at all: no offer, no error, no sign the click had registered.
+  const { unknownModelStatus } = await import("../../src/shared/ipc.ts");
+
+  for (const kind of ["speech", "language"] as const) {
+    const status = unknownModelStatus(kind);
+    assert.equal(status.kind, kind);
+    assert.equal(status.installed, false, "unknown must never read as installed");
+    assert.equal(status.downloading, false);
+    assert.ok(status.displayName, "a name to show");
+    assert.ok(status.description, "and something explaining what it is for");
+    assert.equal(status.approxBytes, MODELS[kind].approxBytes, "the real size, from the catalog");
+    assert.equal(status.error, null, "not knowing is not an error");
+  }
+});

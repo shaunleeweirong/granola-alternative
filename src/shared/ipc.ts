@@ -1,5 +1,5 @@
 import type { Channel, TranscriptSegment } from "../core/transcript/types.ts";
-import type { ModelKind } from "../core/models/catalog.ts";
+import { MODELS, type ModelKind } from "../core/models/catalog.ts";
 import type { NotePreferences } from "../core/notes/noteStyles.ts";
 
 /** Channel names for renderer <-> main. Kept in one place so both sides agree. */
@@ -136,6 +136,32 @@ export interface ModelStatus {
   /** Bytes already on disk from an interrupted attempt, which will be resumed. */
   resumableBytes: number;
   error: string | null;
+}
+
+/**
+ * A stand-in for a model whose real status has not arrived from the main
+ * process yet, or whose status request failed.
+ *
+ * Exists because the alternative was rendering nothing: the download offer used
+ * to be gated on the real status being present, so pressing Generate notes
+ * before it loaded did nothing at all, silently. Describing the model from the
+ * catalog is always possible and always honest, since the catalog is what the
+ * download would use anyway.
+ */
+export function unknownModelStatus(kind: ModelKind): ModelStatus {
+  const spec = MODELS[kind];
+  return {
+    kind,
+    installed: false,
+    displayName: spec.displayName,
+    description: spec.description,
+    approxBytes: spec.approxBytes,
+    downloading: false,
+    receivedBytes: 0,
+    totalBytes: null,
+    resumableBytes: 0,
+    error: null,
+  };
 }
 
 export interface GenerateChunkEvent {
