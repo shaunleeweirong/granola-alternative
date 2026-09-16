@@ -97,25 +97,7 @@ jobs:
           cp "$server" resources/bin/whisper-server
           chmod +x resources/bin/whisper-server
 
-          # Prove it runs away from its build tree. Checking only that the file
-          # exists is what let a binary with unresolved dylibs ship: it was
-          # present, signed, and could not launch on a real machine.
-          probe=$(mktemp -d)
-          cp resources/bin/whisper-server "$probe/"
-          if ! "$probe/whisper-server" --help >"$probe/out.txt" 2>&1; then
-            if grep -qiE "library not loaded|image not found|dyld|symbol not found" "$probe/out.txt"; then
-              echo "::error::whisper-server cannot run outside its build tree (missing shared libraries)"
-              cat "$probe/out.txt"
-              otool -L resources/bin/whisper-server || true
-              exit 1
-            fi
-          fi
-          if otool -L resources/bin/whisper-server | grep -q "\.cache/"; then
-            echo "::error::whisper-server still references libraries in the build tree"
-            otool -L resources/bin/whisper-server
-            exit 1
-          fi
-          echo "whisper-server runs standalone."
+          bash scripts/assert-standalone.sh resources/bin/whisper-server whisper-server .cache
 
       - name: Cache the language engine build
         id: llama-cache
@@ -156,23 +138,7 @@ jobs:
           cp "$server" resources/bin/llama-server
           chmod +x resources/bin/llama-server
 
-          # Prove it runs away from its build tree, exactly as for whisper-server.
-          probe=$(mktemp -d)
-          cp resources/bin/llama-server "$probe/"
-          if ! "$probe/llama-server" --help >"$probe/out.txt" 2>&1; then
-            if grep -qiE "library not loaded|image not found|dyld|symbol not found" "$probe/out.txt"; then
-              echo "::error::llama-server cannot run outside its build tree (missing shared libraries)"
-              cat "$probe/out.txt"
-              otool -L resources/bin/llama-server || true
-              exit 1
-            fi
-          fi
-          if otool -L resources/bin/llama-server | grep -q "\.cache/"; then
-            echo "::error::llama-server still references libraries in the build tree"
-            otool -L resources/bin/llama-server
-            exit 1
-          fi
-          echo "llama-server runs standalone."
+          bash scripts/assert-standalone.sh resources/bin/llama-server llama-server .cache
 
       - name: Build the app bundle
         run: |
@@ -245,17 +211,12 @@ jobs:
 
           # The binary must run from where it will actually live, after
           # copying, signing and hardened-runtime entitlements.
+          # Signed, inside the bundle, and with the build tree hidden: the
+          # closest this runner can get to someone else's Mac.
           for engine in whisper-server llama-server; do
-            bundled="$app/Contents/Resources/bin/$engine"
-            if ! "$bundled" --help >/tmp/bundled.txt 2>&1; then
-              if grep -qiE "library not loaded|image not found|dyld|symbol not found|killed" /tmp/bundled.txt; then
-                echo "::error::the bundled $engine cannot launch"
-                cat /tmp/bundled.txt
-                exit 1
-              fi
-            fi
+            bash scripts/assert-standalone.sh \
+              "$app/Contents/Resources/bin/$engine" "the bundled $engine" .cache
           done
-          echo "Both bundled engines launch."
 
           plist="$app/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c "Print :NSMicrophoneUsageDescription" "$plist" >/dev/null
