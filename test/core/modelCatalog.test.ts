@@ -95,3 +95,18 @@ test("the language model is a GGUF and the speech model is a GGML", () => {
   assert.match(LANGUAGE_MODEL.fileName, /\.gguf$/);
   assert.match(WHISPER_MODEL.fileName, /\.bin$/);
 });
+
+test("every model pins a checksum, and it is a real digest", () => {
+  // Without one, a download is verified by size and header only: enough to
+  // reject a 404 page, not enough to catch a file that arrived corrupt.
+  for (const [kind, model] of Object.entries(MODELS)) {
+    assert.ok(model.sha256, `${kind} has no pinned checksum`);
+    assert.match(model.sha256!, /^[0-9a-f]{64}$/, `${kind} checksum is not a sha256 digest`);
+  }
+});
+
+test("the two models do not share a checksum", () => {
+  // Copy-pasting one digest over the other would make one model permanently
+  // unverifiable, and the failure would look like a corrupt download forever.
+  assert.notEqual(WHISPER_MODEL.sha256, LANGUAGE_MODEL.sha256);
+});

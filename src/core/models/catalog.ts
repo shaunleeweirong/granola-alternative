@@ -36,9 +36,10 @@ export interface ModelSpec {
    */
   minBytes: number;
   /**
-   * Expected digest, once known. The publishing workflow prints it and it gets
-   * pinned here. Null means the download is verified by size and header only,
-   * which catches truncation and error pages but not corruption.
+   * Expected digest. Pinned from the publishing workflow's output, and checked
+   * against the finished download. Null would fall back to verifying by size
+   * and header only, which catches truncation and error pages but not a file
+   * that arrived corrupt.
    */
   sha256: string | null;
   /**
@@ -61,9 +62,9 @@ export const WHISPER_MODEL: ModelSpec = Object.freeze({
   fileName: "ggml-large-v3-turbo-q8_0.bin",
   displayName: "Whisper large-v3-turbo",
   description: "The accurate model, 8-bit. Runs faster than real time on Apple Silicon.",
-  approxBytes: 874_000_000,
+  approxBytes: 874_188_075,
   minBytes: 600_000_000,
-  sha256: null,
+  sha256: "317eb69c11673c9de1e1f0d459b253999804ec71ac4c23c17ecf5fbe24e259a1",
   urls: [
     "https://github.com/shaunleeweirong/granola-alternative/releases/download/models/ggml-large-v3-turbo-q8_0.bin",
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin",
@@ -86,9 +87,9 @@ export const LANGUAGE_MODEL: ModelSpec = Object.freeze({
   fileName: "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
   displayName: "Llama 3.2 3B Instruct",
   description: "Writes the summary, action items and decisions from a transcript.",
-  approxBytes: 2_020_000_000,
+  approxBytes: 2_019_377_696,
   minBytes: 1_200_000_000,
-  sha256: null,
+  sha256: "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
   urls: [
     "https://github.com/shaunleeweirong/granola-alternative/releases/download/models/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
     "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
