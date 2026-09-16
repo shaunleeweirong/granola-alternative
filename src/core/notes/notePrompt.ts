@@ -1,5 +1,10 @@
 import { formatTranscript } from "../transcript/merge.ts";
 import type { TranscriptSegment } from "../transcript/types.ts";
+import {
+  buildFormatBlock,
+  DEFAULT_NOTE_PREFERENCES,
+  type NotePreferences,
+} from "./noteStyles.ts";
 
 /**
  * Builds the note-generation request (FR-24, FR-25).
@@ -9,8 +14,13 @@ import type { TranscriptSegment } from "../transcript/types.ts";
  * reliably misspells proper nouns, so the model is told to reconcile transcript
  * spellings against the meeting title, the user's manual notes and the
  * dictionary, and to mark a name unclear rather than guess.
+ *
+ * These rules are the invariant half, and are deliberately separate from the
+ * output format, which the user chooses. The format is a matter of taste; these
+ * are not. A note style able to switch off "never invent facts" would turn a
+ * meeting record into fiction, so only the format is selectable.
  */
-export const NOTE_SYSTEM_PROMPT = `Convert the provided meeting material into accurate, comprehensive, easy-to-scan notes in Markdown. Priorities, in order: factual accuracy, preservation of specifics, complete coverage of substantive topics, clear decisions and action items, concise presentation.
+export const NOTE_RULES = `Convert the provided meeting material into accurate, comprehensive, easy-to-scan notes in Markdown. Priorities, in order: factual accuracy, preservation of specifics, complete coverage of substantive topics, clear decisions and action items, concise presentation.
 
 RULES:
 - Use only information supported by the material. Never invent facts, decisions, owners, deadlines, or names.
@@ -20,27 +30,17 @@ RULES:
 - Treat the user's manual notes as a signal of what matters most, reconciled against the transcript.
 - The transcript labels the person recording as "You" and everyone else as "Them". Attribute actions accordingly; never invent individual names for "Them".
 - Consolidate repeated discussion into one point. Drop greetings, filler, and false starts. Give longer meetings proportionally more detail.
-- If there is no transcript, structure the user's own notes and skip the meeting-specific sections.
+- If there is no transcript, structure the user's own notes and skip the meeting-specific sections.`;
+
+/** Builds the full system prompt for a chosen output style. */
+export function buildSystemPrompt(prefs: NotePreferences = DEFAULT_NOTE_PREFERENCES): string {
+  return `${NOTE_RULES}
 
 FORMAT:
-- No title, date, attendee list, preamble, table, or horizontal rule. Omit any section with nothing to say.
-
-## Summary
-3-5 bullets: purpose, key subjects, major outcomes, immediate next steps.
-
-## Discussion
-Descriptive topic subheadings named after the actual client, project, or initiative, with enough context that someone who missed the meeting understands what happened and why.
-
-## Decisions
-Only decisions that were explicitly made or clearly agreed.
-
-## Action Items
-Only actions someone committed to or was asked to do; never turn a discussion topic into an action item. One checkbox per item in the form \`- [ ] Action (Owner)\`. Put a stated due date inside the action text. When the transcript shows no owner, end the line after the action; never write a placeholder.
-
-## Open Questions
-Unresolved questions, dependencies, and requested follow-ups.
+${buildFormatBlock(prefs)}
 
 Return only the finished Markdown notes.`;
+}
 
 export interface NotePromptInput {
   title?: string;
@@ -50,6 +50,8 @@ export interface NotePromptInput {
   dictionary?: readonly string[];
   /** Pre-rendered transcript, used when summarising a section (FR-28). */
   transcriptOverride?: string;
+  /** Which output shape the user asked for. Defaults to detailed notes. */
+  preferences?: NotePreferences;
 }
 
 export interface ChatMessage {
@@ -86,7 +88,7 @@ export function buildNoteUserMessage(input: NotePromptInput): string {
 
 export function buildNoteMessages(input: NotePromptInput): ChatMessage[] {
   return [
-    { role: "system", content: NOTE_SYSTEM_PROMPT },
+    { role: "system", content: buildSystemPrompt(input.preferences) },
     { role: "user", content: buildNoteUserMessage(input) },
   ];
 }

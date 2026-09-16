@@ -177,3 +177,27 @@ button.record:disabled { opacity: 0.6; cursor: default; }
 .lm-prompt p { margin: 0 0 10px; line-height: 1.5; }
 .lm-prompt .setup-actions { margin-top: 14px; }
 .lm-prompt .progress { margin: 14px 0 8px; }
+
+/* choosing what Generate notes produces */
+.style-button { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.style-picker {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px;
+}
+.style-picker-head { display: flex; align-items: baseline; justify-content: space-between; }
+.style-picker-head h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+.style-picker .link { background: none; border: 0; color: var(--muted); cursor: pointer; }
+.style-picker .link:hover { color: var(--text); }
+.style-list { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.style-list label {
+  display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: baseline;
+  padding: 7px 9px; border-radius: 6px; cursor: pointer;
+}
+.style-list label:hover { background: var(--panel); }
+.style-list label.selected { background: var(--panel); }
+.style-list input { margin: 0; grid-row: span 2; align-self: start; margin-top: 3px; accent-color: var(--accent); }
+.style-label { font-weight: 500; }
+.style-description { grid-column: 2; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.style-instructions {
+  width: 100%; min-height: 72px; resize: vertical; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; line-height: 1.5;
+}

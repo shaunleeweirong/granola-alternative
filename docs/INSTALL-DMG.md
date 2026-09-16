@@ -68,6 +68,23 @@ If the download is interrupted, reopening the app picks up from where it stopped
 
 You can press **Not now** and use the app without it. Meetings will still record and save; they just will not be transcribed until the model is there, and the banner at the top offers the download again.
 
+## Choosing what the notes look like
+
+Next to **Generate notes** is a button showing the current style. Click it to pick one:
+
+| Style | Produces |
+| --- | --- |
+| Detailed notes | Summary, discussion by topic, decisions, action items, open questions. The default. |
+| Brief summary | A short summary and the action items. Nothing else. |
+| Action items only | Just the checklist of what people committed to. |
+| Executive summary | Three or four paragraphs of prose for someone who was not there. |
+| Full minutes | Chronological record, in the order the meeting happened. |
+| Custom | Describe what you want in your own words. |
+
+There is also an **Extra instructions** box, added on top of whichever style you pick. Things like "always list budget figures" or "write in British English".
+
+The accuracy rules are deliberately not adjustable. Nothing is invented, names are kept exactly as spoken, and what was discussed stays separate from what was decided. A style changes the shape of the output and nothing else.
+
 ## What is and is not in the bundle
 
 | Included | Notes |

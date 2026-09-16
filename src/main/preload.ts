@@ -24,6 +24,8 @@ const api: RendererApi = {
   exportNote: (input) => ipcRenderer.invoke(IPC.notesExport, input),
   generateNotes: (input) => ipcRenderer.invoke(IPC.notesGenerate, input),
 
+  getNotePreferences: () => ipcRenderer.invoke(IPC.notePrefsGet),
+  setNotePreferences: (prefs) => ipcRenderer.invoke(IPC.notePrefsSet, prefs),
   getDictionary: () => ipcRenderer.invoke(IPC.dictionaryGet),
   setDictionary: (terms) => ipcRenderer.invoke(IPC.dictionarySet, terms),
   getServicesStatus: () => ipcRenderer.invoke(IPC.servicesStatus),

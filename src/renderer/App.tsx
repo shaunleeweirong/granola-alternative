@@ -7,9 +7,11 @@ import { TranscriptPanel } from "./components/TranscriptPanel.tsx";
 import { NoteList } from "./components/NoteList.tsx";
 import { ModelSetup } from "./components/ModelSetup.tsx";
 import { LanguageModelPrompt } from "./components/LanguageModelPrompt.tsx";
+import { NoteStylePicker } from "./components/NoteStylePicker.tsx";
 import { formatTimestamp } from "../core/transcript/merge.ts";
 import { progressFraction } from "../core/models/catalog.ts";
 import type { ModelStatus, NoteDto, NoteSummaryDto, ServicesStatus } from "../shared/ipc.ts";
+import { DEFAULT_NOTE_PREFERENCES, resolveStyle, type NotePreferences } from "../core/notes/noteStyles.ts";
 
 export function App(): JSX.Element {
   const [notes, setNotes] = useState<NoteSummaryDto[]>([]);
@@ -23,6 +25,8 @@ export function App(): JSX.Element {
   const [languageModel, setLanguageModel] = useState<ModelStatus | null>(null);
   const [setupDismissed, setSetupDismissed] = useState(false);
   const [offeringLanguageModel, setOfferingLanguageModel] = useState(false);
+  const [notePrefs, setNotePrefs] = useState<NotePreferences>(DEFAULT_NOTE_PREFERENCES);
+  const [pickingStyle, setPickingStyle] = useState(false);
 
   const refreshNotes = useCallback(
     async (search = query) => {
@@ -133,6 +137,21 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (languageModel?.installed) setOfferingLanguageModel(false);
   }, [languageModel?.installed]);
+
+  useEffect(() => {
+    void window.api.getNotePreferences().then(setNotePrefs);
+  }, []);
+
+  // The button that opens it lives beside Generate notes, which is hidden while
+  // recording, so leaving the panel up would strand it with no way back.
+  useEffect(() => {
+    if (state.isRecording) setPickingStyle(false);
+  }, [state.isRecording]);
+
+  const updateNotePrefs = useCallback((next: NotePreferences) => {
+    setNotePrefs(next);
+    void window.api.setNotePreferences(next);
+  }, []);
 
   const liveSegments = state.isRecording ? state.segments : (selected?.segments ?? []);
 
@@ -297,6 +316,14 @@ export function App(): JSX.Element {
 
           {selected && !state.isRecording ? (
             <div className="note-actions">
+              <button
+                type="button"
+                className="style-button"
+                onClick={() => setPickingStyle((open) => !open)}
+                title="Choose what Generate notes produces"
+              >
+                {resolveStyle(notePrefs.styleId).label}
+              </button>
               <button type="button" onClick={() => void generate()} disabled={generating}>
                 {generating ? "Generating…" : "Generate notes"}
               </button>
@@ -331,6 +358,13 @@ export function App(): JSX.Element {
                     onChange={(event) => setTitle(event.target.value)}
                     onBlur={() => void saveTitle()}
                   />
+                  {pickingStyle ? (
+                    <NoteStylePicker
+                      preferences={notePrefs}
+                      onChange={updateNotePrefs}
+                      onClose={() => setPickingStyle(false)}
+                    />
+                  ) : null}
                   {offeringLanguageModel && languageModel ? (
                     <LanguageModelPrompt
                       status={languageModel}

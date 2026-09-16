@@ -12,6 +12,11 @@ import { WhisperClient } from "./whisperClient.ts";
 import { LlamaClient } from "./llamaClient.ts";
 import { LocalService } from "./localService.ts";
 import { buildNoteMessages, chunkTranscript, hasNoteMaterial } from "../core/notes/notePrompt.ts";
+import {
+  DEFAULT_NOTE_PREFERENCES,
+  resolveStyle,
+  type NotePreferences,
+} from "../core/notes/noteStyles.ts";
 import { exportNoteToMarkdown, suggestFilename } from "../core/notes/exportMarkdown.ts";
 import { resolveModelPath } from "../core/modelPaths.ts";
 import { MODELS, WHISPER_MODEL, LANGUAGE_MODEL, type ModelKind } from "../core/models/catalog.ts";
@@ -298,6 +303,10 @@ function registerIpc(): void {
     }
 
     const dictionary = repo.getDictionary();
+    const preferences: NotePreferences = {
+      styleId: resolveStyle(repo.getSetting("notesStyle")).id,
+      instructions: repo.getSetting("notesInstructions") ?? "",
+    };
     // FR-28: summarise in sections when the transcript exceeds the context.
     const sections = chunkTranscript(note.segments, 24_000);
     let generated = "";
@@ -311,6 +320,7 @@ function registerIpc(): void {
             manualNotes: note.manualNotes,
             segments: note.segments,
             dictionary,
+            preferences,
           }),
           onDelta: (delta) => send(IPC.notesGenerateChunk, { noteId, delta }),
         });
@@ -324,6 +334,7 @@ function registerIpc(): void {
                 createdAt: note.createdAt,
                 dictionary,
                 transcriptOverride: section,
+                preferences,
               }),
             })
           );
@@ -335,6 +346,7 @@ function registerIpc(): void {
             manualNotes: note.manualNotes,
             dictionary,
             transcriptOverride: partials.join("\n\n"),
+            preferences,
           }),
           onDelta: (delta) => send(IPC.notesGenerateChunk, { noteId, delta }),
         });
@@ -347,6 +359,18 @@ function registerIpc(): void {
       send(IPC.notesGenerateChunk, { noteId, delta: "", error: (error as Error).message });
       throw error;
     }
+  });
+
+  ipcMain.handle(IPC.notePrefsGet, async (): Promise<NotePreferences> => ({
+    // resolveStyle falls back to the default, so a style removed from a later
+    // build cannot leave someone stuck generating nothing.
+    styleId: resolveStyle(repo.getSetting("notesStyle")).id,
+    instructions: repo.getSetting("notesInstructions") ?? DEFAULT_NOTE_PREFERENCES.instructions,
+  }));
+
+  ipcMain.handle(IPC.notePrefsSet, async (_event, prefs: NotePreferences) => {
+    repo.setSetting("notesStyle", resolveStyle(prefs.styleId).id);
+    repo.setSetting("notesInstructions", (prefs.instructions ?? "").slice(0, 4_000));
   });
 
   ipcMain.handle(IPC.dictionaryGet, async () => repo.getDictionary());

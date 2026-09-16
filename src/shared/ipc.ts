@@ -1,5 +1,6 @@
 import type { Channel, TranscriptSegment } from "../core/transcript/types.ts";
 import type { ModelKind } from "../core/models/catalog.ts";
+import type { NotePreferences } from "../core/notes/noteStyles.ts";
 
 /** Channel names for renderer <-> main. Kept in one place so both sides agree. */
 export const IPC = {
@@ -20,6 +21,8 @@ export const IPC = {
   notesUpdate: "notes:update",
   notesDelete: "notes:delete",
   notesExport: "notes:export",
+  notePrefsGet: "notes:prefs-get",
+  notePrefsSet: "notes:prefs-set",
   dictionaryGet: "dictionary:get",
   dictionarySet: "dictionary:set",
   servicesStatus: "services:status",
@@ -158,6 +161,8 @@ export interface RendererApi {
   deleteNote(input: { noteId: number }): Promise<void>;
   exportNote(input: { noteId: number }): Promise<{ path: string } | null>;
   generateNotes(input: { noteId: number }): Promise<void>;
+  getNotePreferences(): Promise<NotePreferences>;
+  setNotePreferences(prefs: NotePreferences): Promise<void>;
   getDictionary(): Promise<string[]>;
   setDictionary(terms: string[]): Promise<void>;
   getServicesStatus(): Promise<ServicesStatus>;
@@ -174,3 +179,5 @@ export interface RendererApi {
   onSystemAudioStatus(handler: (status: SystemAudioStatus) => void): () => void;
   onModelProgress(handler: (status: ModelStatus) => void): () => void;
 }
+
+export type { NotePreferences };
