@@ -305,7 +305,10 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           if [[ "$GITHUB_REF" != refs/tags/* ]]; then
             tag="build-${GITHUB_SHA::7}"
-            gh release create "$tag" --title "Test build ${GITHUB_SHA::7}" --notes \
+            # --target matters: without it gh tags the DEFAULT branch's head,
+            # so the release shows a commit that is not the one that was built.
+            # That is exactly how a correct .dmg came to look like a stale one.
+            gh release create "$tag" --target "$GITHUB_SHA" --title "Test build ${GITHUB_SHA::7}" --notes \
               "Unsigned test build for Apple Silicon Macs running macOS 14.2 or later. See the install notes in docs/INSTALL-DMG.md." \
               || echo "Release $tag already exists"
           fi

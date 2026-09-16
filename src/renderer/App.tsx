@@ -1,4 +1,7 @@
 import type { JSX } from "react";
+
+/** Injected by Vite at build time; see vite.config.mts. */
+declare const __BUILD_ID__: string;
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useRecorder } from "./useRecorder.ts";
@@ -290,6 +293,9 @@ export function App(): JSX.Element {
           />
         </div>
         <NoteList notes={notes} selectedId={selected?.id ?? null} onSelect={openNote} onDelete={removeNote} />
+        <footer className="build-id" title="The commit this app was built from">
+          Build {__BUILD_ID__}
+        </footer>
       </aside>
 
       <main className="main">
