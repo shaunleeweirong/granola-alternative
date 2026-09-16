@@ -104,7 +104,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache/llama.cpp
-          key: llama-${{ runner.os }}-${{ runner.arch }}-v1
+          key: llama-${{ runner.os }}-${{ runner.arch }}-v2
 
       - name: Build the language engine
         run: |
@@ -123,12 +123,17 @@ jobs:
             git clone --depth 1 https://github.com/ggml-org/llama.cpp.git .cache/llama.cpp
           fi
 
-          # Static, for the same reason whisper-server is: shared libraries left
-          # behind in the build tree produced an app that was signed, present,
-          # and could not launch.
+          # BUILD_SHARED_LIBS=OFF makes llama.cpp's OWN libraries static. It says
+          # nothing about third-party ones, and LLAMA_OPENSSL defaults to ON,
+          # which links Homebrew's OpenSSL from /opt/homebrew. That exists on
+          # this runner and shipped a binary that aborts on launch: even on a
+          # Mac that has Homebrew, the hardened runtime refuses to load a dylib
+          # signed by a different team. Nothing here needs HTTPS, since the
+          # server binds to loopback and the app downloads models itself.
           cmake -S .cache/llama.cpp -B .cache/llama.cpp/build \
             -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_SERVER=ON \
             -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DLLAMA_OPENSSL=OFF \
             -DBUILD_SHARED_LIBS=OFF
           cmake --build .cache/llama.cpp/build --config Release -j "$(sysctl -n hw.ncpu)"
 

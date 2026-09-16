@@ -20,6 +20,12 @@ test -x "$binary" || { echo "::error::$label is missing or not executable: $bina
 
 # 1. Static check. Every library it loads must be part of macOS, or travel
 #    inside the app bundle. Anything else is a dependency on this machine.
+#
+#    This is the one that matters. llama-server shipped linked against
+#    /opt/homebrew/opt/openssl@3/lib/libssl.3.dylib, which exists on the runner
+#    and aborted on launch for the user: the hardened runtime refuses to load a
+#    dylib signed by a different team, so even a Mac WITH Homebrew fails. No
+#    amount of running the binary here would have revealed that.
 strays=$(otool -L "$binary" | tail -n +2 | awk '{print $1}' |
   grep -vE '^(/usr/lib/|/System/Library/|@executable_path/|@loader_path/)' || true)
 if [ -n "$strays" ]; then
