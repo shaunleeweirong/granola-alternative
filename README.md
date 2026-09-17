@@ -39,6 +39,11 @@ See [`docs/INSTALL-DMG.md`](docs/INSTALL-DMG.md), which also covers the Gatekeep
 
 Apple Silicon, macOS 14.2 or later. Everything below is only needed to work on the code.
 
+The window is excluded from screenshots and screen sharing by default, since it
+holds transcripts of past meetings and is often open during a call where the
+screen is shared. **View → Allow Screen Capture** lifts it for the session and
+resets on quit.
+
 ## Requirements
 
 - macOS 14.2 or later (CoreAudio process taps)

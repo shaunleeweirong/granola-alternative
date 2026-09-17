@@ -85,6 +85,19 @@ There is also an **Extra instructions** box, added on top of whichever style you
 
 The accuracy rules are deliberately not adjustable. Nothing is invented, names are kept exactly as spoken, and what was discussed stays separate from what was decided. A style changes the shape of the output and nothing else.
 
+## Screenshots and screen sharing
+
+The window is hidden from screenshots and screen sharing by default. Try to
+capture it and you get the desktop behind it instead.
+
+That is deliberate. The app holds transcripts of meetings you have already had,
+so if it is open while you share your screen in a later call, all of it goes to
+everyone in that room.
+
+To capture it anyway, use **View → Allow Screen Capture**. The tick shows the
+current state, and it resets every time you quit the app, so it cannot be left
+on and forgotten.
+
 ## What is and is not in the bundle
 
 | Included | Notes |

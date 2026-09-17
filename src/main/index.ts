@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { availableParallelism } from "node:os";
@@ -11,6 +11,8 @@ import { AudioTapHost } from "./audioTapHost.ts";
 import { WhisperClient } from "./whisperClient.ts";
 import { LlamaClient } from "./llamaClient.ts";
 import { LocalService } from "./localService.ts";
+import { ScreenCaptureGate } from "./screenCapture.ts";
+import { buildAppMenu } from "./appMenu.ts";
 import { buildNoteMessages, chunkTranscript, hasNoteMaterial } from "../core/notes/notePrompt.ts";
 import {
   DEFAULT_NOTE_PREFERENCES,
@@ -52,6 +54,13 @@ function resourcePath(...parts: string[]): string {
 }
 
 let mainWindow: BrowserWindow | null = null;
+
+/**
+ * Screenshots and screen sharing are blocked by default, because the window
+ * holds transcripts of past meetings and this app is often open during a call
+ * where the screen is being shared. The View menu lifts it for the session.
+ */
+const screenCapture = new ScreenCaptureGate();
 let repo: NotesRepo;
 let controller: RecordingController;
 let whisper: WhisperClient;
@@ -84,8 +93,10 @@ function createWindow(): void {
     },
   });
 
-  // Transcript text must never appear in a screen share.
-  mainWindow.setContentProtection(true);
+  // Blocked unless the View menu says otherwise. Registering rather than
+  // setting it directly means a window reopened from the dock keeps whatever
+  // the menu currently shows.
+  screenCapture.register(mainWindow);
 
   const devServer = process.env.VITE_DEV_SERVER_URL;
   if (devServer) void mainWindow.loadURL(devServer);
@@ -98,6 +109,7 @@ function createWindow(): void {
   });
 
   mainWindow.on("closed", () => {
+    if (mainWindow) screenCapture.forget(mainWindow);
     mainWindow = null;
   });
 }
@@ -473,9 +485,26 @@ function registerIpc(): void {
   });
 }
 
+function applyAppMenu(): void {
+  Menu.setApplicationMenu(
+    buildAppMenu({
+      appName: app.getName(),
+      capture: screenCapture,
+      onToggleCapture: () => {
+        screenCapture.toggle();
+        // Rebuild so the tick matches the gate even if the click was refused
+        // or the state changed elsewhere, rather than trusting the checkbox to
+        // have flipped in step.
+        applyAppMenu();
+      },
+    })
+  );
+}
+
 void app.whenReady().then(async () => {
   initServices();
   registerIpc();
+  applyAppMenu();
   createWindow();
 
   // Servers boot in the background; the UI polls status and explains what is
