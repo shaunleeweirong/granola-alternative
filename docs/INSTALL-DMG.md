@@ -1,6 +1,8 @@
 # Installing the .dmg on another Mac
 
-The `.dmg` is a complete, self-contained app. It is large, roughly 1.8 GB, because the speech model travels inside it. The Mac you install it on needs **no Terminal, no Homebrew, no Node, and no compiler**. Everything is inside the bundle: the app, the system-audio recorder, the speech engine, and the speech model.
+The `.dmg` is about 110 MB. The Mac you install it on needs **no Terminal, no Homebrew, no Node, and no compiler**. The app, the system-audio recorder and both inference engines are inside the bundle.
+
+The models are not. They are downloaded once on first launch, roughly 2.9 GB in total, and kept. Updating the app later does not download them again, which is the whole reason they are not bundled.
 
 **Requirements:** Apple Silicon Mac (M1 or later), macOS 14.2 or later.
 
@@ -10,36 +12,42 @@ The `.dmg` is a complete, self-contained app. It is large, roughly 1.8 GB, becau
 
 ## 1. Get the file
 
-**From a Release:** open the repository's Releases page and download `MeetingNotes-arm64-<commit>.dmg`.
+**From a Release:** open the repository's Releases page and download `CleanRecord-arm64.dmg`.
 
-**From a build run:** open the **Actions** tab → **Build macOS app** → the most recent green run → **Artifacts** → `MeetingNotes-macOS-arm64`. It downloads as a `.zip`; unzip it to get the `.dmg`.
+**From a build run:** open the **Actions** tab → **Build macOS app** → the most recent green run → **Artifacts** → `CleanRecord-macOS-arm64`. It downloads as a `.zip`; unzip it to get the `.dmg`.
 
 ## 2. Install
 
 1. Double-click the `.dmg`.
-2. Drag **Meeting Notes** onto the **Applications** shortcut.
+2. Drag **Clean Record** onto the **Applications** shortcut.
 3. Eject the disk image.
 
-## 3. Get past the security warning
+## 3. If you see a security warning
 
-**This will happen, and it is expected.** The app is signed only with a free ad-hoc signature, not notarised by Apple, because notarisation needs a paid Apple Developer account. macOS treats anything downloaded and un-notarised as untrusted.
+**Released builds are signed and notarised by Apple**, so there should be no warning at all. Double-click and it opens.
 
-The first time you open it you will see something like *"Apple could not verify Meeting Notes is free of malware."*
-
-**The fix, in the interface:**
+If you are testing an unreleased build from the Actions tab, that one is ad-hoc signed instead, and macOS will say something like *"Apple could not verify Clean Record is free of malware."* That is expected for a test build. To get past it:
 
 1. Click **Done** on the warning.
 2. Open **System Settings** → **Privacy & Security**.
-3. Scroll down to the Security section. There is a line naming Meeting Notes.
+3. Scroll down to the Security section. There is a line naming Clean Record.
 4. Click **Open Anyway**, then confirm.
 
-**Or, the one-line version.** Open Terminal and paste this, which strips the "downloaded from the internet" flag:
+Or, in Terminal, strip the "downloaded from the internet" flag:
 
 ```bash
-xattr -dr com.apple.quarantine "/Applications/Meeting Notes.app"
+xattr -dr com.apple.quarantine "/Applications/Clean Record.app"
 ```
 
 After either route, the app opens normally from then on.
+
+To check for yourself whether a particular copy is notarised:
+
+```bash
+spctl --assess --type execute -vv "/Applications/Clean Record.app"
+```
+
+`source=Notarized Developer ID` means Apple has checked it. `rejected` means it is a test build.
 
 ## 4. Allow the two recordings
 
@@ -110,7 +118,7 @@ on and forgotten.
 | --- | --- |
 | Speech model | `ggml-large-v3-turbo-q8_0.bin`, about 834 MB, downloaded on first launch. 8-bit quantisation of the same model Whisper calls large-v3-turbo: near the accuracy of Whisper's largest model, comfortably faster than real time on Apple Silicon. |
 | Note-writing model | `Llama-3.2-3B-Instruct-Q4_K_M.gguf`, about 1.9 GB, downloaded only if you press **Generate notes**. Transcription is the product and works fully without it, so it is never fetched unless you ask for a summary. |
-| A different speech model | Drop any `ggml-*.bin` into `~/Library/Application Support/Meeting Notes/models/` and it takes precedence, with no new build needed. Use this to trade accuracy for speed or download size. |
+| A different speech model | Drop any `ggml-*.bin` into `~/Library/Application Support/Clean Record/models/` and it takes precedence, with no new build needed. Use this to trade accuracy for speed or download size. |
 
 ## Building a new .dmg
 
