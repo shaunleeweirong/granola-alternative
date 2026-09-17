@@ -1,6 +1,6 @@
 {
-  "appId": "com.shaunlee.meetingnotes",
-  "productName": "Meeting Notes",
+  "appId": "app.cleanrecord.desktop",
+  "productName": "Clean Record",
   "copyright": "MIT",
   "directories": { "output": "release", "buildResources": "build" },
   "files": [
@@ -32,14 +32,14 @@
     "entitlements": "build/entitlements.mac.plist",
     "entitlementsInherit": "build/entitlements.mac.plist",
     "extendInfo": {
-      "NSMicrophoneUsageDescription": "Meeting Notes records your microphone so your side of the conversation appears in the transcript.",
-      "NSAudioCaptureUsageDescription": "Meeting Notes records the audio playing on this Mac so the other people on the call appear in the transcript.",
-      "NSCameraUsageDescription": "Not used. Meeting Notes never accesses the camera.",
+      "NSMicrophoneUsageDescription": "Clean Record records your microphone so your side of the conversation appears in the transcript.",
+      "NSAudioCaptureUsageDescription": "Clean Record records the audio playing on this Mac so the other people on the call appear in the transcript.",
+      "NSCameraUsageDescription": "Not used. Clean Record never accesses the camera.",
       "LSMinimumSystemVersion": "14.2"
     }
   },
   "dmg": {
-    "title": "Meeting Notes",
+    "title": "Clean Record",
     "contents": [
       { "x": 140, "y": 200, "type": "file" },
       { "x": 400, "y": 200, "type": "link", "path": "/Applications" }

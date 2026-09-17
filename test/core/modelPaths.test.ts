@@ -8,26 +8,26 @@ const present = (...paths: string[]) => (candidate: string) => paths.includes(ca
 test("a packaged build finds the model shipped inside the app", () => {
   const resolved = resolveModelPath({
     name: "ggml-base.en.bin",
-    userModelDir: "/Users/me/Library/Application Support/Meeting Notes/models",
-    bundledModelDir: "/Applications/Meeting Notes.app/Contents/Resources/models",
-    exists: present("/Applications/Meeting Notes.app/Contents/Resources/models/ggml-base.en.bin"),
+    userModelDir: "/Users/me/Library/Application Support/Clean Record/models",
+    bundledModelDir: "/Applications/Clean Record.app/Contents/Resources/models",
+    exists: present("/Applications/Clean Record.app/Contents/Resources/models/ggml-base.en.bin"),
   });
 
   assert.deepEqual(resolved, {
-    path: "/Applications/Meeting Notes.app/Contents/Resources/models/ggml-base.en.bin",
+    path: "/Applications/Clean Record.app/Contents/Resources/models/ggml-base.en.bin",
     source: "bundled",
   });
 });
 
 test("a model the user installed themselves beats the bundled one", () => {
   // So swapping in a larger, more accurate model never needs a new release.
-  const userPath = "/Users/me/Library/Application Support/Meeting Notes/models/ggml-base.en.bin";
-  const bundledPath = "/Applications/Meeting Notes.app/Contents/Resources/models/ggml-base.en.bin";
+  const userPath = "/Users/me/Library/Application Support/Clean Record/models/ggml-base.en.bin";
+  const bundledPath = "/Applications/Clean Record.app/Contents/Resources/models/ggml-base.en.bin";
 
   const resolved = resolveModelPath({
     name: "ggml-base.en.bin",
-    userModelDir: "/Users/me/Library/Application Support/Meeting Notes/models",
-    bundledModelDir: "/Applications/Meeting Notes.app/Contents/Resources/models",
+    userModelDir: "/Users/me/Library/Application Support/Clean Record/models",
+    bundledModelDir: "/Applications/Clean Record.app/Contents/Resources/models",
     exists: present(userPath, bundledPath),
   });
 

@@ -1,5 +1,5 @@
 {
-  "name": "granola-alternative",
+  "name": "clean-record",
   "version": "0.1.0",
   "private": true,
   "description": "Local-first meeting notes for macOS. Records both sides of a call, transcribes on-device, generates structured notes.",

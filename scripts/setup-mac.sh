@@ -13,7 +13,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN_DIR="$ROOT/resources/bin"
 CACHE_DIR="$ROOT/.cache"
-MODEL_DIR="$HOME/Library/Application Support/granola-alternative/models"
+MODEL_DIR="$HOME/Library/Application Support/clean-record/models"
 MODEL_NAME="ggml-large-v3-turbo-q8_0.bin"
 MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$MODEL_NAME"
 WHISPER_REPO="https://github.com/ggml-org/whisper.cpp.git"

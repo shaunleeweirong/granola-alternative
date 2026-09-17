@@ -397,7 +397,7 @@ test("the destination directory is created if it does not exist", async (t) => {
   const { dir, cleanup } = await tempDir();
   t.after(cleanup);
 
-  const nested = path.join(dir, "Application Support", "Meeting Notes", "models");
+  const nested = path.join(dir, "Application Support", "Clean Record", "models");
   const installed = await downloadModel({ spec: specFor([server.url]), destDir: nested });
   assert.ok((await stat(installed)).size > 0);
 });

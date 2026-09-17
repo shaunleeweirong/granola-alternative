@@ -14,11 +14,22 @@ import path from "node:path";
 const root = path.join(import.meta.dirname, "..");
 const isMac = process.platform === "darwin";
 
-const userDataDir = isMac
-  ? path.join(os.homedir(), "Library", "Application Support", "granola-alternative")
-  : path.join(os.homedir(), ".config", "granola-alternative");
-const modelDir = path.join(userDataDir, "models");
 const WHISPER_MODEL = "ggml-large-v3-turbo-q8_0.bin";
+
+// Electron names the support folder after the app, which differs between a
+// packaged build ("Clean Record", from productName) and `npm run dev`
+// ("clean-record", from package.json). Older names are listed too, because a
+// machine that ran an earlier build still has the model sitting there. Report
+// on whichever one actually holds the model rather than only the dev folder,
+// since a 874 MB download reported as missing is a download someone repeats.
+const supportRoot = isMac
+  ? path.join(os.homedir(), "Library", "Application Support")
+  : path.join(os.homedir(), ".config");
+const candidateDirs = ["clean-record", "Clean Record", "Meeting Notes", "granola-alternative"].map(
+  (name) => path.join(supportRoot, name, "models")
+);
+const modelDir =
+  candidateDirs.find((dir) => existsSync(path.join(dir, WHISPER_MODEL))) ?? candidateDirs[0];
 
 const colour = process.stdout.isTTY && !process.env.NO_COLOR;
 const paint = (code, text) => (colour ? `[${code}m${text}[0m` : text);

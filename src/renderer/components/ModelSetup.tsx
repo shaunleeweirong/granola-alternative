@@ -30,7 +30,7 @@ export function ModelSetup({
       <div className="setup-card">
         <h2>One-time setup</h2>
         <p>
-          Meeting Notes transcribes on this Mac. Nothing is sent anywhere, which means the speech
+          Clean Record transcribes on this Mac. Nothing is sent anywhere, which means the speech
           model has to live here rather than on a server.
         </p>
         <p className="setup-detail">
