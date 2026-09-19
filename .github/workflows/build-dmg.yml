@@ -84,6 +84,13 @@ jobs:
           echo "SIGNING_MODE=$mode" >> "$GITHUB_ENV"
           echo "### Signing: $mode" >> "$GITHUB_STEP_SUMMARY"
 
+          # The same certificate is named two different ways by the two tools
+          # that use it. codesign wants the full common name. electron-builder
+          # wants it without the type prefix and refuses the call outright if
+          # you include it, since it works out the type itself. Derived here
+          # rather than written out twice, so the two cannot drift apart.
+          echo "SIGNING_COMMON_NAME=${SIGNING_IDENTITY#Developer ID Application: }" >> "$GITHUB_ENV"
+
       - name: Unlock the signing certificate
         if: steps.signing.outputs.mode == 'developer-id'
         env:
@@ -273,12 +280,12 @@ jobs:
           # which of them need the inherited entitlements. Hand-rolling that
           # order is how bundles end up with one stale inner signature.
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ env.SIGNING_MODE == 'developer-id' }}
-          CSC_NAME: ${{ env.SIGNING_MODE == 'developer-id' && env.SIGNING_IDENTITY || '' }}
+          CSC_NAME: ${{ env.SIGNING_MODE == 'developer-id' && env.SIGNING_COMMON_NAME || '' }}
           CSC_KEYCHAIN: ${{ env.SIGNING_KEYCHAIN }}
         run: |
           set -euo pipefail
           npm run build
-          npx electron-builder --mac dir --arm64
+          npx electron-builder --mac dir --arm64 --publish never
 
           # electron-builder names the output folder by architecture, and that
           # has changed between versions. Find the bundle rather than guess it.
@@ -394,9 +401,9 @@ jobs:
       - name: Build the .dmg
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ env.SIGNING_MODE == 'developer-id' }}
-          CSC_NAME: ${{ env.SIGNING_MODE == 'developer-id' && env.SIGNING_IDENTITY || '' }}
+          CSC_NAME: ${{ env.SIGNING_MODE == 'developer-id' && env.SIGNING_COMMON_NAME || '' }}
           CSC_KEYCHAIN: ${{ env.SIGNING_KEYCHAIN }}
-        run: npx electron-builder --mac dmg --arm64 --prepackaged "$APP_PATH"
+        run: npx electron-builder --mac dmg --arm64 --publish never --prepackaged "$APP_PATH"
 
       - name: Name the .dmg
         id: artifact
