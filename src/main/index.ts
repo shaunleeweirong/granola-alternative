@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 import path from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { writeFile } from "node:fs/promises";
 import Database from "better-sqlite3";
@@ -13,6 +13,7 @@ import { LlamaClient } from "./llamaClient.ts";
 import { LocalService } from "./localService.ts";
 import { ScreenCaptureGate } from "./screenCapture.ts";
 import { buildAppMenu } from "./appMenu.ts";
+import { migrateUserData, LEGACY_APP_NAMES } from "./userDataMigration.ts";
 import { buildNoteMessages, chunkTranscript, hasNoteMaterial } from "../core/notes/notePrompt.ts";
 import {
   DEFAULT_NOTE_PREFERENCES,
@@ -52,6 +53,42 @@ function resourcePath(...parts: string[]): string {
   const base = app.isPackaged ? process.resourcesPath : path.join(dirname, "..", "..", "resources");
   return path.join(base, ...parts);
 }
+
+/**
+ * Data written under an older name of the app is moved across before anything
+ * opens it.
+ *
+ * Runs at load rather than inside `whenReady` on purpose. Electron begins
+ * writing its own caches into the support folder as soon as the app is up, and
+ * moving files out from under a live database is a far worse problem than the
+ * one being solved.
+ */
+function adoptPreviousUserData(): void {
+  const appData = app.getPath("appData");
+  try {
+    const result = migrateUserData({
+      currentDir: app.getPath("userData"),
+      legacyDirs: LEGACY_APP_NAMES.map((name) => path.join(appData, name)),
+      io: {
+        exists: existsSync,
+        readdir: readdirSync,
+        mkdir: (dir) => void mkdirSync(dir, { recursive: true }),
+        rename: renameSync,
+        join: path.join,
+      },
+    });
+    if (result.from !== null) {
+      console.log(`Carried ${result.moved.length} item(s) over from ${result.from}`);
+    }
+  } catch (error) {
+    // Never block launch on this. Starting with an empty library is annoying
+    // and recoverable, because the old folder is still there untouched.
+    // Refusing to start is neither.
+    console.error("Could not carry data over from a previous version:", error);
+  }
+}
+
+adoptPreviousUserData();
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -203,7 +240,7 @@ function initServices(): void {
   controller = new RecordingController({
     repo,
     whisper,
-    audioDir: path.join(app.getPath("temp"), "granola-alternative"),
+    audioDir: path.join(app.getPath("temp"), "clean-record"),
     language: repo.getSetting("language") ?? "en",
     retainAudio: repo.getSetting("retainAudio") === "true",
     createTapHost: () => {

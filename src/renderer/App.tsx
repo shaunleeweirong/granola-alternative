@@ -297,8 +297,12 @@ export function App(): JSX.Element {
           />
         </div>
         <NoteList notes={notes} selectedId={selected?.id ?? null} onSelect={openNote} onDelete={removeNote} />
-        <footer className="build-id" title="The commit this app was built from">
-          Build {__BUILD_ID__}
+        <footer className="build-id">
+          <span title="The commit this app was built from">Build {__BUILD_ID__}</span>
+          {/* Required, not decoration. The note-writing model is distributed
+              under the Llama 3.2 Community License, which asks for this exact
+              phrase to be shown in the product. See NOTICE. */}
+          <span title="Notes are written by Llama 3.2, running on this Mac">Built with Llama</span>
         </footer>
       </aside>
 

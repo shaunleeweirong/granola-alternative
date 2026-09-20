@@ -204,6 +204,7 @@ button.record:disabled { opacity: 0.6; cursor: default; }
 
 /* which build is this? previously unanswerable from inside the app */
 .build-id {
+  display: flex; justify-content: space-between; gap: 8px;
   padding: 8px 16px 12px; color: var(--muted); font-size: 11px;
   font-family: var(--mono); border-top: 1px solid var(--line); opacity: 0.7;
 }

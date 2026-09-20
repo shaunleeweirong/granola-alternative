@@ -1,4 +1,4 @@
-# granola-alternative
+# Clean Record
 
 A local-first meeting notes app for macOS. Records both sides of a call, transcribes it on-device, and turns the transcript into structured notes.
 
@@ -6,10 +6,10 @@ No accounts, no sync, no teams, no billing. Nothing leaves the machine.
 
 ## Status
 
-Early. The full pipeline is implemented and tested — capture, segmentation, transcription, transcript assembly, storage, search, note generation, export — but it has **not yet been run against a real call**, because the CoreAudio tap needs macOS 14.2+ hardware. See [What is and is not verified](#what-is-and-is-not-verified).
+Working. The full pipeline has been run against real calls on Apple Silicon: capture, segmentation, transcription, transcript assembly, storage, search, note generation, and export. See [What is and is not verified](#what-is-and-is-not-verified).
 
 ```
-130 tests passing · typecheck clean · lint clean · both builds green
+210 tests passing · typecheck clean · lint clean · both builds green
 ```
 
 ## How it works
@@ -33,9 +33,9 @@ As a result this codebase contains **no** echo detector, energy gate, mic hold-b
 
 ## Install without building
 
-For a second Mac, or anyone who should not have to touch a Terminal, build a `.dmg` on GitHub's Mac runners: **Actions → Build macOS app → Run workflow**. It bundles the app, the audio helper, the speech engine and a speech model into one installer.
+Download the latest `.dmg` from the [Releases page](../../releases/latest), drag it to Applications, and open it. Released builds are signed with a Developer ID certificate and notarised by Apple, so there is no Gatekeeper warning to click past. The installer is about 110 MB; the models are downloaded once on first launch.
 
-See [`docs/INSTALL-DMG.md`](docs/INSTALL-DMG.md), which also covers the Gatekeeper warning you will get, since the build is ad-hoc signed rather than notarised.
+To build your own instead: **Actions → Build macOS app → Run workflow**. See [`docs/INSTALL-DMG.md`](docs/INSTALL-DMG.md).
 
 Apple Silicon, macOS 14.2 or later. Everything below is only needed to work on the code.
 
@@ -95,13 +95,23 @@ Place local inference binaries in `resources/bin/` (`whisper-server`, `llama-ser
 - Whisper and llama clients against stub HTTP servers, including timeouts, error shapes and SSE edge cases
 - The capture worklet, evaluated against a stand-in AudioWorkletGlobalScope
 
-**Not yet verified** — needs macOS hardware and a real call:
+**Verified by hand, on Apple Silicon, against real calls:**
 
-- The Swift tap captures real audio. CI now compiles it on a macOS runner and fails the build if it does not, so a green run proves it builds; nothing yet proves it records.
-- Whether Chromium's echo canceller references the correct output device for Bluetooth headsets and multi-output setups. This is the riskiest assumption in the design; prototype it before building further. If it does not hold, the fallback is an explicit WebRTC AEC3 helper fed the tap output as a reference.
-- End-to-end accuracy against the PRD's metrics M-1 (local-speaker recall), M-3 (word error rate) and M-4 (echo bleed)
-- Note quality from a local model, which is what makes this a Granola alternative rather than a transcript viewer
+- The Swift tap captures real system audio, and the two channels arrive labelled and separate
+- Transcription, note generation and export all work end to end on a downloaded model
+- The signed and notarised installer opens without a Gatekeeper warning
 
-## License
+**Still not verified:**
 
-MIT
+- Whether Chromium's echo canceller references the correct output device for Bluetooth headsets and multi-output setups. Tested only with the built-in microphone and speakers so far.
+- End-to-end accuracy against the PRD's metrics M-1 (local-speaker recall), M-3 (word error rate) and M-4 (echo bleed). The pipeline works; the numbers have not been measured.
+
+**Known limitation.** With laptop speakers and the built-in microphone, the other side of the call is picked up twice: once from the system audio tap, and again bleeding into the microphone. Both copies are transcribed, so some lines appear under both You and Them. This is inherent to the category rather than specific to this app, because the echo canceller has no reference signal for another application's output. Headphones remove it entirely.
+
+## Licence
+
+Clean Record is MIT licensed. See [LICENSE](LICENSE).
+
+**Built with Llama.** Notes are written by Llama 3.2 3B Instruct, running on your own Mac. The model is redistributed unmodified under the Llama 3.2 Community License, Copyright (c) Meta Platforms, Inc. All Rights Reserved. The full agreement and its Acceptable Use Policy are in [`licenses/`](licenses/), and [NOTICE](NOTICE) lists every third-party component and its terms.
+
+Speech recognition uses Whisper large-v3-turbo, published by OpenAI under the MIT License.

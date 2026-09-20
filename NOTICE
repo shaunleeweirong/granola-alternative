@@ -1,0 +1,33 @@
+Clean Record
+Copyright (c) 2026 Shaun Lee Wei Rong
+
+Clean Record is MIT licensed; see LICENSE.
+
+This product is Built with Llama.
+
+Llama 3.2 is licensed under the Llama 3.2 Community License, Copyright (c)
+Meta Platforms, Inc. All Rights Reserved.
+
+Clean Record distributes the Llama 3.2 3B Instruct model in GGUF form so that
+the app can download it on first launch. That redistribution is governed by the
+Llama 3.2 Community License, a full copy of which is in this repository at
+licenses/LLAMA-3.2-COMMUNITY-LICENSE.txt, together with the Acceptable Use
+Policy it incorporates at licenses/LLAMA-3.2-ACCEPTABLE-USE-POLICY.md. Use of
+the model, including any output it produces, is subject to both.
+
+The model is used as published. It is not fine-tuned, retrained or otherwise
+modified, and no model derived from it is distributed here.
+
+--- Other components ---
+
+Whisper large-v3-turbo, the speech recognition model, is published by OpenAI
+under the MIT License. It is redistributed here in quantized (Q8_0) GGML form.
+
+whisper.cpp and llama.cpp, the inference engines compiled into this app, are
+copyright (c) 2023-2024 The ggml authors, under the MIT License.
+
+Electron is copyright (c) Electron contributors and copyright (c) 2013-2020
+GitHub Inc., under the MIT License.
+
+better-sqlite3 is copyright (c) 2017 Joshua Wise, under the MIT License.
+SQLite itself is in the public domain.

@@ -63,9 +63,33 @@ jobs:
         run: |
           set -euo pipefail
 
+          # This release is where the Llama materials are actually
+          # redistributed, so the attribution notice the licence asks for has
+          # to travel with it rather than only sit in the repository.
+          cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
+          Models downloaded by Clean Record on demand. Not an app release.
+
+          Built with Llama.
+
+          Llama 3.2 is licensed under the Llama 3.2 Community License,
+          Copyright (c) Meta Platforms, Inc. All Rights Reserved. The full
+          agreement, and the Acceptable Use Policy it incorporates, are in the
+          repository under `licenses/`. The model is redistributed unmodified,
+          in quantized GGUF form.
+
+          Whisper large-v3-turbo is published by OpenAI under the MIT License
+          and is redistributed here in quantized GGML form.
+          NOTES
+          # The heredoc above is indented because a YAML block scalar ends at
+          # the first line that is not, so strip that indentation back off
+          # before it becomes release notes. Not `sed -i`: its argument
+          # handling differs between GNU and BSD and this runs on both.
+          sed 's/^ *//' "$RUNNER_TEMP/notes.md" > "$RUNNER_TEMP/notes.out"
+          mv "$RUNNER_TEMP/notes.out" "$RUNNER_TEMP/notes.md"
+
           gh release create models \
             --title "Speech and language models" \
-            --notes "Models downloaded by Meeting Notes on demand. Not an app release." \
+            --notes-file "$RUNNER_TEMP/notes.md" \
             || echo "the models release already exists"
 
           echo "$MODELS" | jq -c '.[]' | while read -r row; do

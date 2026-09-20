@@ -26,19 +26,129 @@ env:
   # full download of it. The app fetches it once on first launch instead; see
   # src/core/models/catalog.ts and publish-model.yml.
   #
-  # There is no Apple Developer certificate in this repository, so stop
-  # electron-builder hunting for one and failing. The app is ad-hoc signed
-  # below instead, which is the minimum Apple Silicon will run at all.
-  CSC_IDENTITY_AUTO_DISCOVERY: "false"
+  # Neither value below is a secret, and neither belongs in Secrets. Both are
+  # stamped into every signed app, so anyone who downloads Clean Record can
+  # read them straight out of the bundle. Keeping them here means a signature
+  # can be checked against a value that is visible in the repository.
+  APPLE_TEAM_ID: "GG48Z8FP96"
+  SIGNING_IDENTITY: "Developer ID Application: Shaun Lee Wei Rong (GG48Z8FP96)"
 
 jobs:
   build:
     # Apple Silicon runner. The app itself requires macOS 14.2 or later to run.
     runs-on: macos-15
-    timeout-minutes: 60
+    # Notarisation is two round trips to Apple and neither is under our control.
+    timeout-minutes: 90
+
+    # The Apple certificate and the notary key live in this environment, which
+    # has required reviewers. Every run therefore waits for an approval click,
+    # and in exchange nothing that is merely pushed to this repository can
+    # reach the certificate. That trade is deliberate: a leaked Developer ID
+    # key lets someone sign malware as us, and Apple's remedy is to revoke the
+    # certificate, which breaks every copy of the app already in the wild.
+    environment: release
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Decide how this build will be signed
+        id: signing
+        env:
+          CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          API_KEY: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+
+          # Only ever tests whether these are empty, and never prints them.
+          # GitHub masks secrets in logs by matching the literal string, so a
+          # secret that has been sliced, decoded or re-encoded is no longer
+          # masked. The habit of never echoing one matters more than this case.
+          if [ -n "$CERTIFICATE" ] && [ -n "$API_KEY" ]; then
+            mode=developer-id
+          elif [ -n "$CERTIFICATE" ] || [ -n "$API_KEY" ]; then
+            echo "::error::Signing is half configured. Both APPLE_CERTIFICATE_P12 and APPLE_API_KEY_P8 are needed, or neither."
+            exit 1
+          else
+            mode=ad-hoc
+          fi
+
+          # A tagged release is the one people download and trust. Shipping an
+          # ad-hoc build under a version number would send every user through
+          # the "Apple could not verify this app" dialog, so refuse instead.
+          if [ "$mode" = "ad-hoc" ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "::error::Refusing to publish a tagged release without a Developer ID certificate. Add the signing secrets to the 'release' environment first."
+            exit 1
+          fi
+
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "SIGNING_MODE=$mode" >> "$GITHUB_ENV"
+          echo "### Signing: $mode" >> "$GITHUB_STEP_SUMMARY"
+
+          # The same certificate is named two different ways by the two tools
+          # that use it. codesign wants the full common name. electron-builder
+          # wants it without the type prefix and refuses the call outright if
+          # you include it, since it works out the type itself. Derived here
+          # rather than written out twice, so the two cannot drift apart.
+          echo "SIGNING_COMMON_NAME=${SIGNING_IDENTITY#Developer ID Application: }" >> "$GITHUB_ENV"
+
+      - name: Unlock the signing certificate
+        if: steps.signing.outputs.mode == 'developer-id'
+        env:
+          CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+
+          # base64 -d and base64 -D disagree between BSD and GNU, and openssl
+          # chokes on long single lines. Python does neither.
+          decode() {
+            python3 -c 'import base64,sys; sys.stdout.buffer.write(base64.b64decode(sys.stdin.read()))'
+          }
+
+          # A keychain created here and destroyed at the end of the job. The
+          # runner's login keychain is never touched, and this password is
+          # random per run, so it is worth nothing to anyone reading this file.
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password=$(openssl rand -base64 32)
+
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+
+          certificate="$RUNNER_TEMP/certificate.p12"
+          printf '%s' "$CERTIFICATE_P12" | decode > "$certificate"
+          security import "$certificate" -k "$keychain" -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$certificate"
+
+          # Without this, using the key raises a GUI confirmation prompt, and
+          # there is nobody on this machine to click it. The job would simply
+          # hang until the timeout.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$keychain_password" "$keychain" >/dev/null
+
+          # codesign and electron-builder search the user keychain list, so the
+          # new keychain has to join it rather than replace it.
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+
+          key="$RUNNER_TEMP/notary-key.p8"
+          printf '%s' "$API_KEY_P8" | decode > "$key"
+          chmod 600 "$key"
+
+          echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
+          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+          # Fail now rather than after forty minutes of building something that
+          # cannot be signed. This also catches the confusing case of a valid
+          # certificate belonging to a different team.
+          if ! security find-identity -v -p codesigning "$keychain" | grep -qF "$SIGNING_IDENTITY"; then
+            echo "::error::$SIGNING_IDENTITY is not in the imported certificate."
+            echo "What the certificate actually contains:"
+            security find-identity -v -p codesigning "$keychain"
+            exit 1
+          fi
+          echo "Certificate imported and usable."
 
       - uses: actions/setup-node@v4
         with:
@@ -145,11 +255,37 @@ jobs:
 
           bash scripts/assert-standalone.sh resources/bin/llama-server llama-server .cache
 
+      - name: Sign the helper binaries
+        if: env.SIGNING_MODE == 'developer-id'
+        run: |
+          set -euo pipefail
+          # Signed before packaging, so that whatever electron-builder does with
+          # them afterwards they already carry a real signature. One unsigned
+          # Mach-O anywhere in the bundle is enough for the notary service to
+          # reject the whole submission, and it does not always say which.
+          #
+          # --timestamp asks Apple for a trusted timestamp. Notarisation
+          # requires it, which is why the ad-hoc path below can pass
+          # --timestamp=none and this one cannot.
+          for binary in resources/bin/*; do
+            codesign --force --timestamp --options runtime \
+              --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$binary"
+          done
+          codesign --verify --strict --verbose=2 resources/bin/*
+
       - name: Build the app bundle
+        env:
+          # electron-builder does the app signing in Developer ID mode. It
+          # knows Electron's layout: the framework, the three helper apps and
+          # which of them need the inherited entitlements. Hand-rolling that
+          # order is how bundles end up with one stale inner signature.
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ env.SIGNING_MODE == 'developer-id' }}
+          CSC_NAME: ${{ env.SIGNING_MODE == 'developer-id' && env.SIGNING_COMMON_NAME || '' }}
+          CSC_KEYCHAIN: ${{ env.SIGNING_KEYCHAIN }}
         run: |
           set -euo pipefail
           npm run build
-          npx electron-builder --mac dir --arm64
+          npx electron-builder --mac dir --arm64 --publish never
 
           # electron-builder names the output folder by architecture, and that
           # has changed between versions. Find the bundle rather than guess it.
@@ -159,6 +295,7 @@ jobs:
           echo "Built $app"
 
       - name: Ad-hoc sign the app
+        if: env.SIGNING_MODE == 'ad-hoc'
         # Without a signature Apple Silicon refuses to launch the app at all,
         # and macOS ties recording permissions to the signature. An ad-hoc
         # signature is free and enough for a private test build; it is NOT
@@ -194,10 +331,25 @@ jobs:
           app="$APP_PATH"
 
           codesign --verify --deep --strict --verbose=2 "$app"
-          codesign -dv "$app" 2>&1 | tee /tmp/sig.txt
-          grep -q "Signature=adhoc" /tmp/sig.txt || {
-            echo "::error::app is not signed; Apple Silicon will refuse to launch it"; exit 1;
-          }
+          codesign -dv --verbose=4 "$app" 2>&1 | tee /tmp/sig.txt
+
+          if [ "$SIGNING_MODE" = "developer-id" ]; then
+            # Check the team, not just that a signature exists. A build signed
+            # by the wrong certificate looks fine here and is rejected by the
+            # notary service twenty minutes later.
+            grep -q "TeamIdentifier=$APPLE_TEAM_ID" /tmp/sig.txt || {
+              echo "::error::the app is not signed by team $APPLE_TEAM_ID"; exit 1;
+            }
+            # Notarisation requires the hardened runtime. Without this flag the
+            # submission is rejected with a message that does not name it.
+            grep -q "flags=.*runtime" /tmp/sig.txt || {
+              echo "::error::the app is not using the hardened runtime"; exit 1;
+            }
+          else
+            grep -q "Signature=adhoc" /tmp/sig.txt || {
+              echo "::error::app is not signed; Apple Silicon will refuse to launch it"; exit 1;
+            }
+          fi
 
           for required in \
             "Contents/Resources/bin/meeting-audio-tap" \
@@ -228,19 +380,87 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :NSAudioCaptureUsageDescription" "$plist" >/dev/null
           echo "Bundle contents and permission strings verified."
 
-      - name: Build the .dmg
-        run: npx electron-builder --mac dmg --arm64 --prepackaged "$APP_PATH"
+      - name: Notarise the app
+        if: env.SIGNING_MODE == 'developer-id'
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          # Apple takes an archive, not a bundle, and it must be made with
+          # ditto. zip drops the symlinks inside a framework, and the result
+          # comes back rejected for reasons that never mention zip.
+          archive="$RUNNER_TEMP/app.zip"
+          /usr/bin/ditto -c -k --keepParent "$APP_PATH" "$archive"
 
-      - name: Name the .dmg by commit
+          # Submit the archive, staple the bundle: the archive is thrown away
+          # and the bundle is what goes into the .dmg.
+          bash scripts/notarize.sh "$archive" "the app" "$APP_PATH"
+          rm -f "$archive"
+
+      - name: Build the .dmg
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ env.SIGNING_MODE == 'developer-id' }}
+          CSC_NAME: ${{ env.SIGNING_MODE == 'developer-id' && env.SIGNING_COMMON_NAME || '' }}
+          CSC_KEYCHAIN: ${{ env.SIGNING_KEYCHAIN }}
+        run: npx electron-builder --mac dmg --arm64 --publish never --prepackaged "$APP_PATH"
+
+      - name: Name the .dmg
         id: artifact
         run: |
           set -euo pipefail
           dmg=$(find release -maxdepth 1 -name "*.dmg" | head -1)
           test -n "$dmg" || { echo "::error::no .dmg produced"; exit 1; }
-          final="release/MeetingNotes-arm64-${GITHUB_SHA::7}.dmg"
+
+          # A tagged release gets a fixed name, so that
+          # /releases/latest/download/CleanRecord-arm64.dmg is a permanent link
+          # the website can point at and never has to be edited again. Test
+          # builds carry the commit instead, so two of them can sit side by
+          # side without one silently replacing the other.
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            final="release/CleanRecord-arm64.dmg"
+          else
+            final="release/CleanRecord-arm64-${GITHUB_SHA::7}.dmg"
+          fi
           mv "$dmg" "$final"
-          shasum -a 256 "$final" | tee "$final.sha256.txt"
           echo "path=$final" >> "$GITHUB_OUTPUT"
+
+      - name: Sign and notarise the .dmg
+        if: env.SIGNING_MODE == 'developer-id'
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          dmg="${{ steps.artifact.outputs.path }}"
+
+          # The app inside is already notarised, but the .dmg is the file the
+          # browser downloads and quarantines, so it gets the same treatment.
+          # Signed after renaming, because a checksum has to describe the final
+          # file and stapling rewrites it.
+          codesign --force --timestamp \
+            --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$dmg"
+          bash scripts/notarize.sh "$dmg" "the .dmg"
+
+      - name: Check Gatekeeper accepts it
+        if: env.SIGNING_MODE == 'developer-id'
+        run: |
+          set -euo pipefail
+          # As close as this runner gets to a user double-clicking the file. A
+          # rejection here is exactly the dialog they would have seen, and the
+          # source line should read "Notarized Developer ID".
+          spctl --assess --type open --context context:primary-signature -vv \
+            "${{ steps.artifact.outputs.path }}"
+          spctl --assess --type execute -vv "$APP_PATH"
+          echo "Gatekeeper is satisfied. No 'unidentified developer' warning."
+
+      - name: Record the size and checksum
+        run: |
+          set -euo pipefail
+          # Last, because stapling a notarisation ticket rewrites the file and
+          # a checksum taken before that describes something nobody downloads.
+          final="${{ steps.artifact.outputs.path }}"
+          shasum -a 256 "$final" | tee "$final.sha256.txt"
           ls -lh "$final"
 
           # Without the model this should be around 110 MB. If it creeps back
@@ -255,7 +475,7 @@ jobs:
       - name: Upload the .dmg
         uses: actions/upload-artifact@v4
         with:
-          name: MeetingNotes-macOS-arm64
+          name: CleanRecord-macOS-arm64
           path: |
             release/*.dmg
             release/*.sha256.txt
@@ -268,14 +488,94 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-          if [[ "$GITHUB_REF" != refs/tags/* ]]; then
+
+          checksum=$(cut -d' ' -f1 release/*.sha256.txt)
+          notes="$RUNNER_TEMP/release-notes.md"
+
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            tag="${GITHUB_REF_NAME}"
+            title="Clean Record ${tag}"
+            # Written for somebody who has landed on the Releases page and has
+            # never heard of this app, because that is who downloads it.
+            cat > "$notes" <<'NOTES'
+          Meeting notes that never leave your Mac.
+
+          Clean Record records both sides of a call, transcribes it on this machine, and turns the transcript into structured notes. No account, no sync, no server. Nothing is uploaded, because there is nowhere to upload it to.
+
+          ## Requirements
+
+          Apple Silicon Mac (M1 or later), macOS 14.2 or later.
+
+          ## Installing
+
+          Download the `.dmg` below, open it, and drag Clean Record to Applications. It is signed with a Developer ID certificate and notarised by Apple, so it opens on a double click with no security warning.
+
+          On first launch it downloads two models, about 2.9 GB in total, and keeps them. Later updates do not download them again, which is why the installer itself is only 120 MB.
+
+          macOS will ask for two permissions the first time you record. Both are needed: the microphone for your side of the call, and system audio recording for everyone else's.
+
+          ## Known limitation
+
+          On laptop speakers with the built-in microphone, the other side of the call is captured twice, once from the system audio and again bleeding into the microphone. Some lines therefore appear under both You and Them. This is inherent to recording a call without a bot in it, and headphones remove it entirely.
+
+          ## Verifying the download
+
+          ```
+          shasum -a 256 __DMG__
+          ```
+
+          should print:
+
+          ```
+          __CHECKSUM__
+          ```
+
+          ## Licence
+
+          MIT. Built with Llama: notes are written by Llama 3.2 3B Instruct running on your own Mac, under the Llama 3.2 Community License. Speech recognition uses OpenAI's Whisper large-v3-turbo under the MIT License. See NOTICE in the repository for the full list.
+          NOTES
+          else
             tag="build-${GITHUB_SHA::7}"
-            # --target matters: without it gh tags the DEFAULT branch's head,
-            # so the release shows a commit that is not the one that was built.
-            # That is exactly how a correct .dmg came to look like a stale one.
-            gh release create "$tag" --target "$GITHUB_SHA" --title "Test build ${GITHUB_SHA::7}" --notes \
-              "Unsigned test build for Apple Silicon Macs running macOS 14.2 or later. See the install notes in docs/INSTALL-DMG.md." \
-              || echo "Release $tag already exists"
+            title="Test build ${GITHUB_SHA::7}"
+            cat > "$notes" <<'NOTES'
+          Test build, not a release. Apple Silicon, macOS 14.2 or later.
+
+          SHA-256: `__CHECKSUM__`
+          NOTES
           fi
+
+          # The heredocs are indented so the YAML block scalar does not end at
+          # them; strip that back off. The placeholders are filled here rather
+          # than by expanding the heredoc, because release notes are full of
+          # backticks and an unquoted heredoc would run them as commands.
+          sed -e 's/^ *//' -e "s/__CHECKSUM__/$checksum/" -e "s/__DMG__/$(basename release/*.dmg)/" \
+            "$notes" > "$notes.out"
+          mv "$notes.out" "$notes"
+
+          # --target matters on an untagged build: without it gh tags the
+          # DEFAULT branch's head, so the release shows a commit that is not
+          # the one that was built. That is exactly how a correct .dmg once
+          # came to look like a stale one. On a real tag the tag already
+          # points at the right commit, so passing it would be redundant.
+          create=(--title "$title" --notes-file "$notes")
+          if [[ "$GITHUB_REF" != refs/tags/* ]]; then
+            create+=(--target "$GITHUB_SHA")
+          fi
+
+          # Previously this ran ONLY for untagged builds, so a version tag
+          # reached the upload below with no release to upload to and failed.
+          gh release create "$tag" "${create[@]}" || echo "Release $tag already exists"
           gh release upload "$tag" release/*.dmg release/*.sha256.txt --clobber
+
+      - name: Remove the signing material from the runner
+        if: always()
+        run: |
+          # The runner is destroyed after the job, but a cancelled job can leave
+          # an unlocked private key sitting on disk and the keychain still in
+          # the search list. Neither is worth leaving to luck.
+          set +e
+          if [ -n "${SIGNING_KEYCHAIN:-}" ]; then
+            security delete-keychain "$SIGNING_KEYCHAIN" 2>/dev/null
+          fi
+          rm -f "$RUNNER_TEMP/notary-key.p8" "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/app.zip"
+          exit 0
