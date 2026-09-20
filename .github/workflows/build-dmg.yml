@@ -10,8 +10,12 @@ name: Build macOS app
 on:
   workflow_dispatch:
     inputs:
+      version:
+        description: "Publish as this version, e.g. v0.1.0. Creates the tag. Leave blank for a test build."
+        type: string
+        default: ""
       release:
-        description: "Also publish a GitHub Release with the .dmg"
+        description: "Publish an untagged test build as a Release too"
         type: boolean
         default: false
   push:
@@ -72,16 +76,38 @@ jobs:
             mode=ad-hoc
           fi
 
-          # A tagged release is the one people download and trust. Shipping an
-          # ad-hoc build under a version number would send every user through
-          # the "Apple could not verify this app" dialog, so refuse instead.
-          if [ "$mode" = "ad-hoc" ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "::error::Refusing to publish a tagged release without a Developer ID certificate. Add the signing secrets to the 'release' environment first."
-            exit 1
+          # A release can arrive two ways: a pushed v* tag, or the version
+          # input, which exists because pushing a tag is not always possible
+          # and the runner's own token can create one.
+          version="${{ inputs.version }}"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            version="$GITHUB_REF_NAME"
+          fi
+
+          if [ -n "$version" ]; then
+            # A typo here becomes a permanent public tag, so check the shape.
+            if ! [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+              echo "::error::'$version' is not a version like v0.1.0"
+              exit 1
+            fi
+            # The number in package.json is what the app reports about itself.
+            # Publishing v0.2.0 from a tree that calls itself 0.1.0 produces an
+            # app that disagrees with its own download page.
+            declared=$(node -p "require('./package.json').version")
+            if [ "$version" != "v$declared" ]; then
+              echo "::error::tag $version does not match package.json version $declared"
+              exit 1
+            fi
+            if [ "$mode" = "ad-hoc" ]; then
+              echo "::error::Refusing to publish $version without a Developer ID certificate."
+              exit 1
+            fi
+            echo "### Release: $version" >> "$GITHUB_STEP_SUMMARY"
           fi
 
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           echo "SIGNING_MODE=$mode" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
           echo "### Signing: $mode" >> "$GITHUB_STEP_SUMMARY"
 
           # The same certificate is named two different ways by the two tools
@@ -417,7 +443,7 @@ jobs:
           # the website can point at and never has to be edited again. Test
           # builds carry the commit instead, so two of them can sit side by
           # side without one silently replacing the other.
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+          if [ -n "${RELEASE_VERSION:-}" ]; then
             final="release/CleanRecord-arm64.dmg"
           else
             final="release/CleanRecord-arm64-${GITHUB_SHA::7}.dmg"
@@ -483,7 +509,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish a Release
-        if: startsWith(github.ref, 'refs/tags/v') || inputs.release
+        if: env.RELEASE_VERSION != '' || inputs.release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -492,8 +518,8 @@ jobs:
           checksum=$(cut -d' ' -f1 release/*.sha256.txt)
           notes="$RUNNER_TEMP/release-notes.md"
 
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            tag="${GITHUB_REF_NAME}"
+          if [ -n "${RELEASE_VERSION:-}" ]; then
+            tag="$RELEASE_VERSION"
             title="Clean Record ${tag}"
             # Written for somebody who has landed on the Releases page and has
             # never heard of this app, because that is who downloads it.
@@ -552,14 +578,14 @@ jobs:
             "$notes" > "$notes.out"
           mv "$notes.out" "$notes"
 
-          # --target matters on an untagged build: without it gh tags the
-          # DEFAULT branch's head, so the release shows a commit that is not
-          # the one that was built. That is exactly how a correct .dmg once
-          # came to look like a stale one. On a real tag the tag already
-          # points at the right commit, so passing it would be redundant.
-          create=(--title "$title" --notes-file "$notes")
-          if [[ "$GITHUB_REF" != refs/tags/* ]]; then
-            create+=(--target "$GITHUB_SHA")
+          # --target does two jobs. It creates the tag when the run was
+          # started from a branch rather than a tag, which is how a release is
+          # cut without pushing one. And it pins the release to the commit that
+          # was actually built: without it gh tags the DEFAULT branch's head,
+          # which is exactly how a correct .dmg once came to look stale.
+          create=(--title "$title" --notes-file "$notes" --target "$GITHUB_SHA")
+          if [ -n "${RELEASE_VERSION:-}" ]; then
+            create+=(--latest)
           fi
 
           # Previously this ran ONLY for untagged builds, so a version tag
