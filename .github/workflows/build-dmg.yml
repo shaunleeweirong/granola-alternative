@@ -488,20 +488,83 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-          if [[ "$GITHUB_REF" != refs/tags/* ]]; then
+
+          checksum=$(cut -d' ' -f1 release/*.sha256.txt)
+          notes="$RUNNER_TEMP/release-notes.md"
+
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            tag="${GITHUB_REF_NAME}"
+            title="Clean Record ${tag}"
+            # Written for somebody who has landed on the Releases page and has
+            # never heard of this app, because that is who downloads it.
+            cat > "$notes" <<'NOTES'
+          Meeting notes that never leave your Mac.
+
+          Clean Record records both sides of a call, transcribes it on this machine, and turns the transcript into structured notes. No account, no sync, no server. Nothing is uploaded, because there is nowhere to upload it to.
+
+          ## Requirements
+
+          Apple Silicon Mac (M1 or later), macOS 14.2 or later.
+
+          ## Installing
+
+          Download the `.dmg` below, open it, and drag Clean Record to Applications. It is signed with a Developer ID certificate and notarised by Apple, so it opens on a double click with no security warning.
+
+          On first launch it downloads two models, about 2.9 GB in total, and keeps them. Later updates do not download them again, which is why the installer itself is only 120 MB.
+
+          macOS will ask for two permissions the first time you record. Both are needed: the microphone for your side of the call, and system audio recording for everyone else's.
+
+          ## Known limitation
+
+          On laptop speakers with the built-in microphone, the other side of the call is captured twice, once from the system audio and again bleeding into the microphone. Some lines therefore appear under both You and Them. This is inherent to recording a call without a bot in it, and headphones remove it entirely.
+
+          ## Verifying the download
+
+          ```
+          shasum -a 256 __DMG__
+          ```
+
+          should print:
+
+          ```
+          __CHECKSUM__
+          ```
+
+          ## Licence
+
+          MIT. Built with Llama: notes are written by Llama 3.2 3B Instruct running on your own Mac, under the Llama 3.2 Community License. Speech recognition uses OpenAI's Whisper large-v3-turbo under the MIT License. See NOTICE in the repository for the full list.
+          NOTES
+          else
             tag="build-${GITHUB_SHA::7}"
-            if [ "$SIGNING_MODE" = "developer-id" ]; then
-              notes="Signed and notarised test build for Apple Silicon Macs running macOS 14.2 or later."
-            else
-              notes="Unsigned test build for Apple Silicon Macs running macOS 14.2 or later. See the install notes in docs/INSTALL-DMG.md."
-            fi
-            # --target matters: without it gh tags the DEFAULT branch's head,
-            # so the release shows a commit that is not the one that was built.
-            # That is exactly how a correct .dmg came to look like a stale one.
-            gh release create "$tag" --target "$GITHUB_SHA" --title "Test build ${GITHUB_SHA::7}" --notes "$notes" \
-              || echo "Release $tag already exists"
+            title="Test build ${GITHUB_SHA::7}"
+            cat > "$notes" <<'NOTES'
+          Test build, not a release. Apple Silicon, macOS 14.2 or later.
+
+          SHA-256: `__CHECKSUM__`
+          NOTES
           fi
+
+          # The heredocs are indented so the YAML block scalar does not end at
+          # them; strip that back off. The placeholders are filled here rather
+          # than by expanding the heredoc, because release notes are full of
+          # backticks and an unquoted heredoc would run them as commands.
+          sed -e 's/^ *//' -e "s/__CHECKSUM__/$checksum/" -e "s/__DMG__/$(basename release/*.dmg)/" \
+            "$notes" > "$notes.out"
+          mv "$notes.out" "$notes"
+
+          # --target matters on an untagged build: without it gh tags the
+          # DEFAULT branch's head, so the release shows a commit that is not
+          # the one that was built. That is exactly how a correct .dmg once
+          # came to look like a stale one. On a real tag the tag already
+          # points at the right commit, so passing it would be redundant.
+          create=(--title "$title" --notes-file "$notes")
+          if [[ "$GITHUB_REF" != refs/tags/* ]]; then
+            create+=(--target "$GITHUB_SHA")
+          fi
+
+          # Previously this ran ONLY for untagged builds, so a version tag
+          # reached the upload below with no release to upload to and failed.
+          gh release create "$tag" "${create[@]}" || echo "Release $tag already exists"
           gh release upload "$tag" release/*.dmg release/*.sha256.txt --clobber
 
       - name: Remove the signing material from the runner
