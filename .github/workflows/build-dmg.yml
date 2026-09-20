@@ -564,7 +564,13 @@ jobs:
 
           # Previously this ran ONLY for untagged builds, so a version tag
           # reached the upload below with no release to upload to and failed.
-          gh release create "$tag" "${create[@]}" || echo "Release $tag already exists"
+          #
+          # The release may already exist, because creating one in the GitHub
+          # UI is how a tag gets made when a push of the tag itself is not
+          # possible. Fill in the notes in that case rather than leaving
+          # whatever placeholder was typed into the web form.
+          gh release create "$tag" "${create[@]}" \
+            || gh release edit "$tag" --title "$title" --notes-file "$notes"
           gh release upload "$tag" release/*.dmg release/*.sha256.txt --clobber
 
       - name: Remove the signing material from the runner
