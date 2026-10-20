@@ -8,6 +8,9 @@ import Database from "better-sqlite3";
 import { NotesRepo } from "../core/db/notesRepo.ts";
 import { RecordingController } from "./recordingController.ts";
 import { AudioTapHost } from "./audioTapHost.ts";
+import { MeetingDetector } from "./meetingDetector.ts";
+import { AutoStopMonitor } from "./autoStopMonitor.ts";
+import { AutoStopPanel } from "./autoStopPanel.ts";
 import { WhisperClient } from "./whisperClient.ts";
 import { LlamaClient } from "./llamaClient.ts";
 import { LocalService } from "./localService.ts";
@@ -22,6 +25,12 @@ import {
 } from "../core/notes/noteStyles.ts";
 import { exportNoteToMarkdown, suggestFilename } from "../core/notes/exportMarkdown.ts";
 import { resolveModelPath } from "../core/modelPaths.ts";
+import {
+  AUTO_STOP_SETTING_KEYS,
+  resolveAutoStopSettings,
+  type AutoStopSettings,
+  type AutoStopStatus,
+} from "../core/autoStop.ts";
 import { MODELS, WHISPER_MODEL, LANGUAGE_MODEL, type ModelKind } from "../core/models/catalog.ts";
 import {
   downloadModel,
@@ -29,7 +38,17 @@ import {
   partialBytes,
   type DownloadProgress,
 } from "./modelDownloader.ts";
-import { IPC, type ModelStatus, type ServicesStatus } from "../shared/ipc.ts";
+import {
+  IPC,
+  type AutoStopChoice,
+  type CurrentRecording,
+  type ModelStatus,
+  type RecordingStoppedEvent,
+  type ServicesStatus,
+  type StopReason,
+  type StopRecordingResult,
+  type SystemAudioStatus,
+} from "../shared/ipc.ts";
 import type { TranscriptSegment } from "../core/transcript/types.ts";
 
 // The main process is emitted as CommonJS (see tsconfig.main.json), so
@@ -104,6 +123,22 @@ let whisper: WhisperClient;
 let llama: LlamaClient;
 let whisperService: LocalService;
 let llamaService: LocalService;
+let autoStop: AutoStopMonitor;
+let autoStopPanel: AutoStopPanel;
+
+/** The latest system-audio health, for a window that opens partway through a recording. */
+let systemAudioStatus: SystemAudioStatus | null = null;
+/** The stop still finishing, so a click and an automatic stop together end the recording once. */
+let stopping: Promise<StopRecordingResult> | null = null;
+/** The window was closed during a recording, and only hidden so the recording could go on. */
+let hiddenForRecording = false;
+/** Set once the app is on its way out, which is the one time closing the window really closes it. */
+let quitting = false;
+let shutdown: Promise<void> | null = null;
+let readyToQuit = false;
+
+/** A recording still running at quit gets this long to finish before the app goes anyway. */
+const QUIT_STOP_TIMEOUT_MS = 15_000;
 
 /** In-flight downloads and last failures, keyed by which model they concern. */
 const modelDownloads = new Map<ModelKind, { controller: AbortController; progress: DownloadProgress }>();
@@ -113,6 +148,20 @@ let userModelDir = "";
 const send = (channel: string, payload: unknown): void => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
 };
+
+/** Load the UI into a window: the main view, or another one such as the auto-stop panel. */
+function loadRenderer(window: BrowserWindow, view?: string): void {
+  const devServer = process.env.VITE_DEV_SERVER_URL;
+  if (devServer) {
+    void window.loadURL(view ? `${devServer}?view=${view}` : devServer);
+    return;
+  }
+  // __dirname is dist/src/main at runtime; vite writes the UI to dist/renderer.
+  void window.loadFile(
+    path.join(dirname, "..", "..", "renderer", "index.html"),
+    view ? { query: { view } } : undefined
+  );
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -135,14 +184,22 @@ function createWindow(): void {
   // the menu currently shows.
   screenCapture.register(mainWindow);
 
-  const devServer = process.env.VITE_DEV_SERVER_URL;
-  if (devServer) void mainWindow.loadURL(devServer);
-  // __dirname is dist/src/main at runtime; vite writes the UI to dist/renderer.
-  else void mainWindow.loadFile(path.join(dirname, "..", "..", "renderer", "index.html"));
+  loadRenderer(mainWindow);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: "deny" };
+  });
+
+  // The window holds the microphone. Closing it during a recording used to cut
+  // off your side of the call while the other side went on recording, and the
+  // window that reopened from the dock had no way to stop it. So during a
+  // recording it is hidden instead, and the dock brings it back.
+  mainWindow.on("close", (event) => {
+    if (quitting || !controller?.current) return;
+    event.preventDefault();
+    hiddenForRecording = true;
+    mainWindow?.hide();
   });
 
   mainWindow.on("closed", () => {
@@ -215,6 +272,65 @@ async function currentModelStatus(kind: ModelKind): Promise<ModelStatus> {
 const pushModelStatus = async (kind: ModelKind): Promise<void> =>
   send(IPC.modelProgress, await currentModelStatus(kind));
 
+function autoStopSettings(): AutoStopSettings {
+  return resolveAutoStopSettings({
+    stopWhenCallEnds: repo.getSetting(AUTO_STOP_SETTING_KEYS.stopWhenCallEnds),
+    silenceMinutes: repo.getSetting(AUTO_STOP_SETTING_KEYS.silenceMinutes),
+  });
+}
+
+/** The countdown goes to the main window and to the floating panel. */
+function showAutoStop(status: AutoStopStatus | null): void {
+  send(IPC.autoStopStatus, status);
+  if (!status) {
+    autoStopPanel.hide();
+    return;
+  }
+  // A panel that is still loading asks for the countdown itself once it is up.
+  autoStopPanel.show();
+  autoStopPanel.webContents?.send(IPC.autoStopStatus, status);
+}
+
+/**
+ * End the recording, whoever asked: the Stop button, the countdown, or quitting.
+ *
+ * A recording stops being current the moment its stop begins, though finishing
+ * it (the last windows still transcribing) takes a while longer. A second stop
+ * in that gap, a click landing with an automatic stop, gets the same result
+ * rather than failing. A recording started in that gap is a new one, and is
+ * stopped in its own right rather than handed the old one's result.
+ */
+function stopRecording(reason: StopReason, message: string | null = null): Promise<StopRecordingResult> {
+  const active = controller.current;
+  if (!active) return stopping ?? Promise.reject(new Error("No recording is in progress"));
+
+  autoStop.end();
+  const promise: Promise<StopRecordingResult> = controller
+    .stop()
+    .then((result) => {
+      const event: RecordingStoppedEvent = {
+        sessionId: active.sessionId,
+        noteId: result.noteId,
+        reason,
+        message,
+      };
+      send(IPC.recordingStopped, event);
+      return result;
+    })
+    .finally(() => {
+      if (stopping === promise) stopping = null;
+      if (controller.current) return;
+      systemAudioStatus = null;
+      // Closed during the recording and kept only so it could finish. It has.
+      if (hiddenForRecording && mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+        mainWindow.close();
+      }
+      hiddenForRecording = false;
+    });
+  stopping = promise;
+  return promise;
+}
+
 function initServices(): void {
   const dbPath = path.join(app.getPath("userData"), "notes.db");
   repo = new NotesRepo(new Database(dbPath));
@@ -258,20 +374,72 @@ function initServices(): void {
         noteId,
         segment,
       }),
-    onLevel: (channel, rms) => send(IPC.recordingLevel, { channel, rms }),
+    onLevel: (channel, rms) => {
+      send(IPC.recordingLevel, { channel, rms });
+      autoStop.heard(channel, rms);
+    },
     onError: (message, fatal) =>
       send(IPC.transcriptError, { sessionId: controller.current?.sessionId ?? "", message, fatal }),
     onSystemAudioSilent: () => send(IPC.audioSystemSilent, {}),
-    onSystemAudioStatus: (status) => send(IPC.audioSystemStatus, status),
+    onSystemAudioStatus: (status) => {
+      systemAudioStatus = status;
+      send(IPC.audioSystemStatus, status);
+    },
+  });
+
+  autoStop = new AutoStopMonitor({
+    settings: autoStopSettings,
+    createDetector: () => {
+      if (!systemAudioSupported()) return null;
+      const binary = resourcePath("bin", "meeting-detector");
+      if (!existsSync(binary)) return null;
+      return new MeetingDetector({ command: binary });
+    },
+    ownPids: () => [
+      process.pid,
+      ...app.getAppMetrics().map((metric) => metric.pid),
+      ...controller.helperPids,
+    ],
+    onStatus: showAutoStop,
+    onStop: (status) => {
+      void stopRecording(status.reason, status.stoppedMessage).catch(() => {});
+    },
+    onLog: (line) => console.log(`[auto-stop] ${line}`),
+  });
+
+  autoStopPanel = new AutoStopPanel({
+    preload: path.join(dirname, "preload.js"),
+    load: (window) => loadRenderer(window, "auto-stop"),
+    capture: screenCapture,
   });
 }
 
 function registerIpc(): void {
-  ipcMain.handle(IPC.recordingStart, async (_event, input: { title?: string }) =>
-    controller.start(input ?? {})
-  );
+  ipcMain.handle(IPC.recordingStart, async (_event, input: { title?: string }) => {
+    const started = await controller.start(input ?? {});
+    autoStop.begin(controller.current?.startedAt ?? Date.now());
+    return started;
+  });
 
-  ipcMain.handle(IPC.recordingStop, async () => controller.stop());
+  ipcMain.handle(IPC.recordingStop, async () => stopRecording("user"));
+
+  ipcMain.handle(IPC.recordingCurrent, async (): Promise<CurrentRecording | null> => {
+    const active = controller.current;
+    if (!active) return null;
+    return { ...active, systemAudio: systemAudioStatus, autoStop: autoStop.status };
+  });
+
+  ipcMain.handle(IPC.autoStopRespond, async (_event, choice: AutoStopChoice) => {
+    if (choice === "keep") {
+      autoStop.keep();
+      return;
+    }
+    // "Stop now" agrees with the countdown, so the stop carries its reason.
+    const status = autoStop.status;
+    if (controller.current) {
+      await stopRecording(status?.reason ?? "user", status?.stoppedMessage ?? null);
+    }
+  });
 
   ipcMain.on(IPC.recordingMicChunk, (_event, pcm: ArrayBuffer) => {
     controller.pushMicAudio(Buffer.from(pcm));
@@ -534,6 +702,20 @@ function applyAppMenu(): void {
         // have flipped in step.
         applyAppMenu();
       },
+      autoStop: autoStopSettings(),
+      onToggleStopWhenCallEnds: () => {
+        repo.setSetting(
+          AUTO_STOP_SETTING_KEYS.stopWhenCallEnds,
+          String(!autoStopSettings().stopWhenCallEnds)
+        );
+        autoStop.settingsChanged();
+        applyAppMenu();
+      },
+      onSelectSilenceLimit: (minutes) => {
+        repo.setSetting(AUTO_STOP_SETTING_KEYS.silenceMinutes, String(minutes));
+        autoStop.settingsChanged();
+        applyAppMenu();
+      },
     })
   );
 }
@@ -550,7 +732,14 @@ void app.whenReady().then(async () => {
   void llamaService.start();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    // A window hidden during a recording comes back, rather than a second one
+    // being built alongside it.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      hiddenForRecording = false;
+      mainWindow.show();
+      return;
+    }
+    createWindow();
   });
 });
 
@@ -558,6 +747,31 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", async () => {
-  await Promise.all([whisperService?.stop(), llamaService?.stop()]);
+/**
+ * Quitting used to abandon a recording in progress: its last stretch was never
+ * transcribed and the meeting's length was never saved. Finish it first, then
+ * shut the engines down, since transcription needs them until the very end.
+ *
+ * Electron does not wait for an async handler, so quitting is held off here
+ * and resumed once everything has wound down.
+ */
+app.on("before-quit", (event) => {
+  quitting = true;
+  if (readyToQuit) return;
+  event.preventDefault();
+
+  shutdown ??= (async () => {
+    // Including one already stopping, whose last windows are still transcribing.
+    if (controller?.current || stopping) {
+      await Promise.race([
+        stopRecording("quit").catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, QUIT_STOP_TIMEOUT_MS)),
+      ]);
+    }
+    autoStopPanel?.hide();
+    await Promise.all([whisperService?.stop(), llamaService?.stop()]);
+  })().finally(() => {
+    readyToQuit = true;
+    app.quit();
+  });
 });

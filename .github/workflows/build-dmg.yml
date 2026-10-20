@@ -194,6 +194,9 @@ jobs:
           test -x resources/bin/meeting-audio-tap || {
             echo "::error::The Swift audio helper did not build"; exit 1;
           }
+          test -x resources/bin/meeting-detector || {
+            echo "::error::The Swift meeting detector did not build"; exit 1;
+          }
 
       - name: Cache the speech engine build
         id: whisper-cache
@@ -379,6 +382,7 @@ jobs:
 
           for required in \
             "Contents/Resources/bin/meeting-audio-tap" \
+            "Contents/Resources/bin/meeting-detector" \
             "Contents/Resources/bin/whisper-server" \
             "Contents/Resources/bin/llama-server"; do
             test -e "$app/$required" || { echo "::error::missing $required"; exit 1; }

@@ -9,7 +9,7 @@ No accounts, no sync, no teams, no billing. Nothing leaves the machine.
 Working. The full pipeline has been run against real calls on Apple Silicon: capture, segmentation, transcription, transcript assembly, storage, search, note generation, and export. See [What is and is not verified](#what-is-and-is-not-verified).
 
 ```
-210 tests passing · typecheck clean · lint clean · both builds green
+257 tests passing · typecheck clean · lint clean · both builds green
 ```
 
 ## How it works
@@ -39,6 +39,22 @@ To build your own instead: **Actions → Build macOS app → Run workflow**. See
 
 Apple Silicon, macOS 14.2 or later. Everything below is only needed to work on the code.
 
+## Stopping automatically
+
+A recording ends by itself when someone forgets to press Stop. Three rules, whichever comes first:
+
+| Rule | When it fires |
+| --- | --- |
+| The call ended | About 15 seconds after the app that was using the microphone (Zoom, Teams, Meet in a browser, a Slack huddle) lets go of it |
+| Silence | Nothing heard on either side for 10 minutes, 30 minutes, 1 hour or 2 hours |
+| Length | 4 hours, extendable an hour at a time |
+
+None of them stops the recording outright. Each shows a 30-second countdown in a small floating window, with **Keep recording** and **Stop now**, so a wrong guess costs one click. Both settings are in the **View** menu (**Stop Recording When Call Ends**, **Stop Recording After Silence**) and apply to every recording, including one already running.
+
+The call rule needs no list of meeting apps: whatever other app held the microphone during the recording is treated as the call. It needs no extra permission either, since it reads the same information as the orange microphone indicator in the menu bar. The silence rule can be held open by music or videos played after the call, because system audio is heard from every app; the call rule and the 4-hour cap cover that case.
+
+Closing the window during a recording now hides it rather than ending your side of the capture, and the dock brings it back. Quitting finishes the recording properly first.
+
 The window is excluded from screenshots and screen sharing by default, since it
 holds transcripts of past meetings and is often open during a call where the
 screen is shared. **View → Allow Screen Capture** lifts it for the session and
@@ -59,7 +75,7 @@ The app launches and records without the two servers; it reports what is missing
 
 ```bash
 npm install          # also builds the Swift audio tap on macOS
-npm run verify       # typecheck, lint, 130 tests, both builds
+npm run verify       # typecheck, lint, tests, both builds
 npm run dev          # renderer dev server
 npm start            # build main and launch Electron
 ```
@@ -77,9 +93,11 @@ Place local inference binaries in `resources/bin/` (`whisper-server`, `llama-ser
 | `src/core/queue/` | Single-worker, oldest-audio-first transcription queue |
 | `src/core/db/` | SQLite schema and the notes repository with FTS5 search |
 | `src/core/recordingSession.ts` | Orchestrates two channels into one transcript |
+| `src/core/autoStop.ts` | When a recording stops by itself: the call ending, silence, the length cap |
 | `src/main/` | Electron main, tap supervision, whisper and llama clients |
 | `src/renderer/` | Capture worklet, mic constraints, React UI |
 | `native/macos-audio-tap/` | Swift system-audio helper |
+| `native/meeting-detector/` | Swift helper that reports which apps are using the microphone |
 | `tasks/prd-meeting-notes.md` | Requirements, architecture, and the teardown findings |
 
 ## What is and is not verified
@@ -94,6 +112,7 @@ Place local inference binaries in `resources/bin/` (`whisper-server`, `llama-ser
 - The tap supervisor, driven by a fake helper that splits JSON events and PCM samples across read boundaries
 - Whisper and llama clients against stub HTTP servers, including timeouts, error shapes and SSE edge cases
 - The capture worklet, evaluated against a stand-in AudioWorkletGlobalScope
+- Auto-stop: every rule, the countdown and its cancellation, settings, and the meeting-detector supervisor driven by a fake helper
 
 **Verified by hand, on Apple Silicon, against real calls:**
 
@@ -104,6 +123,7 @@ Place local inference binaries in `resources/bin/` (`whisper-server`, `llama-ser
 **Still not verified:**
 
 - Whether Chromium's echo canceller references the correct output device for Bluetooth headsets and multi-output setups. Tested only with the built-in microphone and speakers so far.
+- Auto-stop's call rule against real calls. The Swift meeting detector has not yet been run on a Mac, and each call app's behaviour needs checking: Zoom and Teams are expected to keep the microphone open while muted, but if one releases it on mute, a long mute will open the countdown.
 - End-to-end accuracy against the PRD's metrics M-1 (local-speaker recall), M-3 (word error rate) and M-4 (echo bleed). The pipeline works; the numbers have not been measured.
 
 **Known limitation.** With laptop speakers and the built-in microphone, the other side of the call is picked up twice: once from the system audio tap, and again bleeding into the microphone. Both copies are transcribed, so some lines appear under both You and Them. This is inherent to the category rather than specific to this app, because the echo canceller has no reference signal for another application's output. Headphones remove it entirely.

@@ -154,6 +154,16 @@ check("System audio helper built", () => {
   };
 });
 
+check("Meeting detector built", () => {
+  const file = path.join(root, "resources", "bin", "meeting-detector");
+  const ok = isExecutable(file);
+  return {
+    ok,
+    detail: ok ? file : "not built yet, so recordings will not stop when a call ends",
+    fix: ok ? undefined : "Run: npm run build:tap",
+  };
+});
+
 check("Speech recognition engine", () => {
   const file = path.join(root, "resources", "bin", "whisper-server");
   const ok = isExecutable(file);

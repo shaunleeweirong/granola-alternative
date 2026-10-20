@@ -95,6 +95,15 @@ export class RecordingController {
     return this.active;
   }
 
+  /**
+   * Processes this recording has spawned. The system-audio helper reads from
+   * an input device, so it can look like one more app using a microphone.
+   */
+  get helperPids(): number[] {
+    const pid = this.tap?.pid;
+    return pid ? [pid] : [];
+  }
+
   async start(input: { title?: string } = {}): Promise<{
     sessionId: string;
     noteId: number;

@@ -69,6 +69,10 @@ export class AudioTapHost {
     return this.child !== null && this.child.exitCode === null;
   }
 
+  get pid(): number | null {
+    return this.child?.pid ?? null;
+  }
+
   /** Resolves once the helper reports it is capturing; rejects otherwise. */
   start(handlers: AudioTapHandlers): Promise<void> {
     if (this.child) return Promise.reject(new Error("Audio tap is already running"));

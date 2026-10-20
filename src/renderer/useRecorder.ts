@@ -2,7 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { buildMicConstraints } from "./audio/micConstraints.ts";
 import { createCapturePipeline, type CapturePipeline } from "./audio/pcmWorklet.ts";
-import type { RendererApi, StartRecordingResult, SystemAudioStatus } from "../shared/ipc.ts";
+import type {
+  AutoStopStatus,
+  CurrentRecording,
+  RendererApi,
+  StartRecordingResult,
+  SystemAudioStatus,
+} from "../shared/ipc.ts";
 import type { TranscriptSegment } from "../core/transcript/types.ts";
 
 declare global {
@@ -26,6 +32,10 @@ export interface RecorderState {
    * dies mid-meeting stays on screen instead of scrolling away unnoticed.
    */
   systemAudio: SystemAudioStatus | null;
+  /** A countdown to the recording stopping by itself, while one is running. */
+  autoStop: AutoStopStatus | null;
+  /** Why the last recording stopped, when it stopped by itself. */
+  notice: string | null;
 }
 
 const INITIAL: RecorderState = {
@@ -39,13 +49,21 @@ const INITIAL: RecorderState = {
   warning: null,
   error: null,
   systemAudio: null,
+  autoStop: null,
+  notice: null,
 };
+
+const micUnavailable = (error: unknown): string =>
+  `Microphone unavailable: ${(error as Error).message}. Grant access in System Settings → Privacy & Security → Microphone.`;
 
 export function useRecorder(onFinished?: (noteId: number) => void) {
   const [state, setState] = useState<RecorderState>(INITIAL);
   const pipelineRef = useRef<CapturePipeline | null>(null);
   const sessionRef = useRef<string | null>(null);
   const startedAtRef = useRef<number>(0);
+  // Read from listeners registered once for the app's lifetime.
+  const onFinishedRef = useRef(onFinished);
+  onFinishedRef.current = onFinished;
 
   // Segments, levels and errors stream in from main for the whole app lifetime.
   useEffect(() => {
@@ -82,12 +100,73 @@ export function useRecorder(onFinished?: (noteId: number) => void) {
       setState((prev) => ({ ...prev, systemAudio }));
     });
 
+    const offAutoStop = window.api.onAutoStopStatus((autoStop) => {
+      setState((prev) => ({ ...prev, autoStop }));
+    });
+
+    // The main process can now end a recording by itself. A stop this window
+    // asked for has already cleared the session, so only those are handled here.
+    const offStopped = window.api.onRecordingStopped(({ sessionId, noteId, message }) => {
+      if (!sessionId || sessionId !== sessionRef.current) return;
+      sessionRef.current = null;
+      void pipelineRef.current?.stop().catch(() => {});
+      pipelineRef.current = null;
+      setState((prev) => ({ ...prev, isRecording: false, autoStop: null, notice: message }));
+      onFinishedRef.current?.(noteId);
+    });
+
     return () => {
       offSegment();
       offLevel();
       offError();
       offSilent();
       offSystemAudio();
+      offAutoStop();
+      offStopped();
+    };
+  }, []);
+
+  // A reload builds a fresh window while the main process carries on
+  // recording. Pick that recording back up, microphone included, instead of
+  // offering "Record meeting" over one that could then never be stopped.
+  useEffect(() => {
+    let cancelled = false;
+
+    const adopt = async (current: CurrentRecording): Promise<void> => {
+      sessionRef.current = current.sessionId;
+      startedAtRef.current = current.startedAt;
+      const note = await window.api.getNote({ noteId: current.noteId }).catch(() => null);
+      if (cancelled || sessionRef.current !== current.sessionId) return;
+      setState({
+        ...INITIAL,
+        isRecording: true,
+        noteId: current.noteId,
+        elapsedMs: Date.now() - current.startedAt,
+        segments: note?.segments ?? [],
+        systemAudio: current.systemAudio,
+        autoStop: current.autoStop,
+      });
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(buildMicConstraints());
+        if (cancelled || sessionRef.current !== current.sessionId) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        pipelineRef.current = await createCapturePipeline(stream, ({ pcm }) => {
+          window.api.sendMicChunk(pcm, 0);
+        });
+      } catch (error) {
+        setState((prev) => ({ ...prev, error: micUnavailable(error) }));
+      }
+    };
+
+    void window.api.getCurrentRecording().then((current) => {
+      if (!cancelled && current && !sessionRef.current) void adopt(current);
+    });
+
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -107,10 +186,7 @@ export function useRecorder(onFinished?: (noteId: number) => void) {
     try {
       stream = await navigator.mediaDevices.getUserMedia(buildMicConstraints());
     } catch (error) {
-      setState({
-        ...INITIAL,
-        error: `Microphone unavailable: ${(error as Error).message}. Grant access in System Settings → Privacy & Security → Microphone.`,
-      });
+      setState({ ...INITIAL, error: micUnavailable(error) });
       return null;
     }
 
@@ -151,18 +227,21 @@ export function useRecorder(onFinished?: (noteId: number) => void) {
     pipelineRef.current = null;
 
     if (!sessionId) {
-      setState((prev) => ({ ...prev, isRecording: false }));
+      setState((prev) => ({ ...prev, isRecording: false, autoStop: null }));
       return;
     }
 
     try {
       const result = await window.api.stopRecording({ sessionId });
-      setState((prev) => ({ ...prev, isRecording: false }));
+      setState((prev) => ({ ...prev, isRecording: false, autoStop: null }));
       onFinished?.(result.noteId);
     } catch (error) {
-      setState((prev) => ({ ...prev, isRecording: false, error: (error as Error).message }));
+      setState((prev) => ({ ...prev, isRecording: false, autoStop: null, error: (error as Error).message }));
     }
   }, [onFinished]);
+
+  const keepRecording = useCallback(() => void window.api.respondToAutoStop("keep"), []);
+  const dismissNotice = useCallback(() => setState((prev) => ({ ...prev, notice: null })), []);
 
   // Never leave the microphone open if the window goes away mid-recording.
   useEffect(() => {
@@ -171,5 +250,5 @@ export function useRecorder(onFinished?: (noteId: number) => void) {
     };
   }, []);
 
-  return { state, start, stop };
+  return { state, start, stop, keepRecording, dismissNotice };
 }

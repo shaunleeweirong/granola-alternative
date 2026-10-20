@@ -15,6 +15,8 @@ const subscribe = <T>(channel: string, handler: (payload: T) => void): (() => vo
 const api: RendererApi = {
   startRecording: (input) => ipcRenderer.invoke(IPC.recordingStart, input),
   stopRecording: (input) => ipcRenderer.invoke(IPC.recordingStop, input),
+  getCurrentRecording: () => ipcRenderer.invoke(IPC.recordingCurrent),
+  respondToAutoStop: (choice) => ipcRenderer.invoke(IPC.autoStopRespond, choice),
   sendMicChunk: (pcm, startSample) => ipcRenderer.send(IPC.recordingMicChunk, pcm, startSample),
 
   listNotes: (input) => ipcRenderer.invoke(IPC.notesList, input),
@@ -40,6 +42,8 @@ const api: RendererApi = {
   onGenerateChunk: (handler) => subscribe(IPC.notesGenerateChunk, handler),
   onSystemAudioSilent: (handler) => subscribe(IPC.audioSystemSilent, () => handler()),
   onSystemAudioStatus: (handler) => subscribe(IPC.audioSystemStatus, handler),
+  onRecordingStopped: (handler) => subscribe(IPC.recordingStopped, handler),
+  onAutoStopStatus: (handler) => subscribe(IPC.autoStopStatus, handler),
   onModelProgress: (handler) => subscribe(IPC.modelProgress, handler),
 };
 

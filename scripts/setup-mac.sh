@@ -88,12 +88,12 @@ fi
 
 # ------------------------------------------------------- 3. system audio tap
 
-next "Building the system-audio helper"
-if [ -x "$BIN_DIR/meeting-audio-tap" ]; then
+next "Building the system-audio helper and meeting detector"
+if [ -x "$BIN_DIR/meeting-audio-tap" ] && [ -x "$BIN_DIR/meeting-detector" ]; then
   ok "already built"
 else
   (cd "$ROOT" && node scripts/build-audio-tap.mjs)
-  [ -x "$BIN_DIR/meeting-audio-tap" ] || die "the audio helper did not build" \
+  [ -x "$BIN_DIR/meeting-audio-tap" ] && [ -x "$BIN_DIR/meeting-detector" ] || die "the native helpers did not build" \
     "This part has never been compiled before, so an error here is expected and fixable.
 Copy the messages above and send them over."
   ok "built"

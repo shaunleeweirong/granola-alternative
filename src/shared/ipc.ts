@@ -1,17 +1,22 @@
 import type { Channel, TranscriptSegment } from "../core/transcript/types.ts";
 import { MODELS, type ModelKind } from "../core/models/catalog.ts";
 import type { NotePreferences } from "../core/notes/noteStyles.ts";
+import type { AutoStopReason, AutoStopStatus } from "../core/autoStop.ts";
 
 /** Channel names for renderer <-> main. Kept in one place so both sides agree. */
 export const IPC = {
   recordingStart: "recording:start",
   recordingStop: "recording:stop",
+  recordingCurrent: "recording:current",
+  recordingStopped: "recording:stopped",
   recordingMicChunk: "recording:mic-chunk",
   recordingLevel: "recording:level",
   transcriptSegment: "transcript:segment",
   transcriptError: "transcript:error",
   audioSystemSilent: "audio:system-silent",
   audioSystemStatus: "audio:system-status",
+  autoStopStatus: "auto-stop:status",
+  autoStopRespond: "auto-stop:respond",
   permissionsSystemAudio: "permissions:system-audio",
   permissionsRequestSystemAudio: "permissions:request-system-audio",
   notesGenerate: "notes:generate",
@@ -45,6 +50,42 @@ export interface StopRecordingResult {
   segmentCount: number;
   durationMs: number;
 }
+
+/** Why a recording ended. */
+export type StopReason = "user" | "quit" | AutoStopReason;
+
+/**
+ * Sent whenever a recording ends, whoever ended it.
+ *
+ * The window used to be the only thing that could stop a recording, so it
+ * always knew. Now the main process can end one by itself, when the call ends
+ * or the room goes quiet, and the window has to be told so it can release the
+ * microphone and stop showing a recording that is no longer happening.
+ */
+export interface RecordingStoppedEvent {
+  sessionId: string;
+  noteId: number;
+  reason: StopReason;
+  /** Why it stopped, in words, when it was not the user's own click. */
+  message: string | null;
+}
+
+/**
+ * The recording in progress, for a window that opens partway through one.
+ *
+ * A reload builds a fresh window while the main process carries on recording.
+ * Without this it showed "Record meeting" over a recording that could no
+ * longer be stopped from the window at all.
+ */
+export interface CurrentRecording {
+  sessionId: string;
+  noteId: number;
+  startedAt: number;
+  systemAudio: SystemAudioStatus | null;
+  autoStop: AutoStopStatus | null;
+}
+
+export type AutoStopChoice = "keep" | "stop";
 
 export interface LevelUpdate {
   channel: Channel;
@@ -175,6 +216,8 @@ export interface GenerateChunkEvent {
 export interface RendererApi {
   startRecording(input: { title?: string }): Promise<StartRecordingResult>;
   stopRecording(input: { sessionId: string }): Promise<StopRecordingResult>;
+  getCurrentRecording(): Promise<CurrentRecording | null>;
+  respondToAutoStop(choice: AutoStopChoice): Promise<void>;
   sendMicChunk(pcm: ArrayBuffer, startSample: number): void;
   listNotes(input: { query?: string; limit?: number; offset?: number }): Promise<NoteSummaryDto[]>;
   getNote(input: { noteId: number }): Promise<NoteDto | null>;
@@ -203,7 +246,9 @@ export interface RendererApi {
   onGenerateChunk(handler: (event: GenerateChunkEvent) => void): () => void;
   onSystemAudioSilent(handler: () => void): () => void;
   onSystemAudioStatus(handler: (status: SystemAudioStatus) => void): () => void;
+  onRecordingStopped(handler: (event: RecordingStoppedEvent) => void): () => void;
+  onAutoStopStatus(handler: (status: AutoStopStatus | null) => void): () => void;
   onModelProgress(handler: (status: ModelStatus) => void): () => void;
 }
 
-export type { NotePreferences };
+export type { NotePreferences, AutoStopReason, AutoStopStatus };

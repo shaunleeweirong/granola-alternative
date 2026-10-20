@@ -271,6 +271,21 @@ test("starting twice is refused", async (t) => {
   await h.controller.stop();
 });
 
+test("the system-audio helper is named, so it is not mistaken for a call app", async (t) => {
+  // The helper reads from an input device, which can make it look like one
+  // more app using a microphone. Auto-stop excludes whatever this lists.
+  const h = await makeHarness();
+  t.after(h.cleanup);
+
+  assert.deepEqual(h.controller.helperPids, [], "nothing running before a recording");
+  await h.controller.start();
+  const [pid] = h.controller.helperPids;
+  assert.ok(Number.isInteger(pid) && pid > 0, "the running helper's process is listed");
+
+  await h.controller.stop();
+  assert.deepEqual(h.controller.helperPids, [], "and nothing once it has stopped");
+});
+
 test("stopping without starting is refused", async (t) => {
   const h = await makeHarness();
   t.after(h.cleanup);

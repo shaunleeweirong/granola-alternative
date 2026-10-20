@@ -45,7 +45,7 @@ export function App(): JSX.Element {
     setGenerateError(null);
   }, []);
 
-  const { state, start, stop } = useRecorder(
+  const { state, start, stop, keepRecording, dismissNotice } = useRecorder(
     useCallback(
       async (noteId: number) => {
         await refreshNotes();
@@ -219,7 +219,16 @@ export function App(): JSX.Element {
   }, [model]);
 
   const banner = useMemo(() => {
-    // First, because it is the only failure that silently costs half the
+    // The recording is about to end. The floating panel shows the countdown;
+    // this is the same choice for someone looking at the main window instead.
+    if (state.isRecording && state.autoStop) {
+      return {
+        tone: "warn" as const,
+        text: `${state.autoStop.message} The recording will stop shortly.`,
+        action: { label: "Keep recording", run: keepRecording },
+      };
+    }
+    // Next, because it is the only failure that silently costs half the
     // conversation, and it is happening right now rather than in a past message.
     const systemAudio = state.systemAudio;
     if (state.isRecording && systemAudio?.state === "recovering") {
@@ -236,6 +245,9 @@ export function App(): JSX.Element {
     }
     if (state.error) return { tone: "error" as const, text: state.error };
     if (generateError) return { tone: "error" as const, text: generateError };
+    if (state.notice && !state.isRecording) {
+      return { tone: "info" as const, text: state.notice, action: { label: "Dismiss", run: dismissNotice } };
+    }
     if (state.warning) return { tone: "warn" as const, text: state.warning };
     if (model && !model.installed) {
       return {
@@ -267,7 +279,20 @@ export function App(): JSX.Element {
       };
     }
     return null;
-  }, [state.error, state.warning, state.systemAudio, state.isRecording, generateError, status, model, modelPercent]);
+  }, [
+    state.error,
+    state.warning,
+    state.systemAudio,
+    state.isRecording,
+    state.autoStop,
+    state.notice,
+    keepRecording,
+    dismissNotice,
+    generateError,
+    status,
+    model,
+    modelPercent,
+  ]);
 
   if (model && !model.installed && !setupDismissed) {
     return (

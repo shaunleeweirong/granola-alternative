@@ -96,6 +96,7 @@ button.record:disabled { opacity: 0.6; cursor: default; }
 .banner-action:hover { background: rgba(255, 255, 255, 0.18); }
 .banner.warn { background: #2a2214; color: #f0c987; }
 .banner.error { background: #2c1817; color: #f0a79c; }
+.banner.info { background: var(--panel-2); color: var(--text); }
 
 /* panes */
 .panes { display: grid; grid-template-columns: 1fr 1fr; flex: 1; overflow: hidden; }
@@ -208,3 +209,20 @@ button.record:disabled { opacity: 0.6; cursor: default; }
   padding: 8px 16px 12px; color: var(--muted); font-size: 11px;
   font-family: var(--mono); border-top: 1px solid var(--line); opacity: 0.7;
 }
+
+/* auto-stop countdown, in its own floating window */
+body.auto-stop-view { background: var(--panel); overflow: hidden; }
+.auto-stop-panel {
+  height: 100vh; box-sizing: border-box; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 6px;
+  border: 1px solid var(--line); border-radius: 10px;
+  -webkit-app-region: drag; user-select: none;
+}
+.auto-stop-message { margin: 0; font-size: 13px; font-weight: 600; }
+.auto-stop-countdown { margin: 0; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.auto-stop-actions { display: flex; gap: 8px; margin-top: auto; -webkit-app-region: no-drag; }
+.auto-stop-actions button {
+  flex: 1; padding: 7px 10px; border-radius: 6px; font: inherit; font-size: 13px; cursor: pointer;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+}
+.auto-stop-actions button.stop { background: var(--danger); color: #1a0806; border-color: transparent; }
