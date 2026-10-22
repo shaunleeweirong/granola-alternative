@@ -85,7 +85,23 @@ if [ "$status" != "Accepted" ]; then
   exit 1
 fi
 
-xcrun stapler staple "$staple_target"
+# Stapling downloads the ticket from a different Apple service from the one
+# that just said Accepted, and that download has dropped the connection in the
+# middle of a release ("The network connection was lost", stapler error 68),
+# one second after acceptance. The notarisation itself had succeeded, so give
+# the download a few more chances rather than throwing the build away.
+attempts=5
+for attempt in $(seq 1 "$attempts"); do
+  if xcrun stapler staple "$staple_target"; then
+    break
+  fi
+  if [ "$attempt" -eq "$attempts" ]; then
+    echo "::error::$label was notarised, but its ticket could not be stapled after $attempts attempts"
+    exit 1
+  fi
+  echo "Stapling attempt $attempt of $attempts failed; trying again in ${STAPLE_RETRY_DELAY:-20} seconds."
+  sleep "${STAPLE_RETRY_DELAY:-20}"
+done
 xcrun stapler validate "$staple_target"
 
 echo "$label is notarised and stapled."
