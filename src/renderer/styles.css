@@ -149,6 +149,8 @@ button.record:disabled { opacity: 0.6; cursor: default; }
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
   padding: 7px 14px; cursor: pointer;
 }
+/* same specificity as button.record and later, so the primary has to be restated */
+.setup-actions button.record { background: var(--accent); border-color: var(--accent); color: #1a1206; }
 .setup-actions .link { background: none; border: 0; color: var(--muted); padding: 7px 4px; }
 .setup-actions .link:hover { color: var(--text); }
 
